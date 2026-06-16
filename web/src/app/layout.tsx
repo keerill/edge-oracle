@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Syne, Sora, JetBrains_Mono } from "next/font/google";
 import { NO_FLASH_SCRIPT } from "@/lib/theme";
 import AppShell from "@/components/AppShell";
+import NotificationsProvider from "@/components/NotificationsProvider";
 import "@/styles/globals.scss";
 
 const syne = Syne({
@@ -27,7 +28,8 @@ const jetbrains = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "EdgeOracle — quant advisor",
-  description: "Quantitative edge signals on Polymarket. Advisor, not executor.",
+  description:
+    "Quantitative edge signals on Polymarket. Advisor, not executor.",
 };
 
 export default function RootLayout({
@@ -48,7 +50,9 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_SCRIPT }} />
       </head>
       <body>
-        <AppShell>{children}</AppShell>
+        <AppShell>
+          <NotificationsProvider>{children}</NotificationsProvider>
+        </AppShell>
       </body>
     </html>
   );

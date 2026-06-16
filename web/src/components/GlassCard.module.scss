@@ -59,3 +59,9 @@
 .glow-green {
   @include glow-accent(var(--neon-green));
 }
+.glow-amber {
+  @include glow-accent(var(--neon-amber));
+}
+.glow-red {
+  @include glow-accent(var(--neon-red));
+}

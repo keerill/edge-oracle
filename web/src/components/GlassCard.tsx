@@ -1,7 +1,7 @@
 import type { ElementType, ReactNode } from "react";
 import styles from "./GlassCard.module.scss";
 
-type AccentGlow = "violet" | "magenta" | "cyan" | "green" | "none";
+type AccentGlow = "violet" | "magenta" | "cyan" | "green" | "amber" | "red" | "none";
 
 type GlassCardProps = {
   children: ReactNode;

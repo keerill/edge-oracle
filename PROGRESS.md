@@ -207,7 +207,85 @@ wallet, no persistence this slice.** Tests are the spec (TDD: written first, wat
   (mirrors how `math/longshot.py`+`math/correction.py` shipped before their scanner). `frac`/`cap`
   are function defaults; they become `EDGE_*` knobs when a sizing scanner/endpoint lands.
 
+## Slice: Calibration journal (proving the probabilities are real)  ✅ done (2026-06-16)
+
+How we hold the models honest: when a market resolves, journal `(estimate p, market price
+m, outcome 0/1, strategy, ts)`, then score the journal — Brier + log-loss (overall and per
+strategy tag), a decile reliability curve (claimed vs realized), and a **conservative,
+shrink-only** Kelly-fraction suggestion when the model is overconfident in its
+high-confidence bins. **Advisor only — math + persistence; no resolution-watcher, no
+endpoint, no producer wiring this slice.** Tests are the spec (TDD: written first, watched
+fail).
+
+### What's done
+- **Pure math** (`app/math/calibration.py`): `brier_score`, `log_loss`,
+  `reliability_curve`, `suggest_kelly_fraction`, `summarize`, plus a frozen
+  `CalibrationParams` (knobs: `n_bins`, `eps`, `high_confidence_threshold`, `base_frac`,
+  `min_multiplier`, `ln_prec`, all range-validated). `Decimal` in, frozen models out; no
+  I/O, no clock, no `Settings`.
+- **Models** (`app/models/calibration.py`): frozen `CalibrationRecord` (the journal row;
+  `estimate`/`price` in [0,1], `outcome: Literal[0,1]`) + result models `ReliabilityBin`,
+  `CalibrationMetrics`, `KellyAdjustment`, `CalibrationSummary`.
+- **Schema**: `calibration` *regular* table (`app/db/tables.py`) + Alembic
+  `0004_calibration` — `estimate`/`price` unbounded NUMERIC, `outcome` SmallInteger +
+  `ck_calibration_outcome` CHECK, `strategy` NOT NULL (no server_default), `ix_calibration_time`
+  + `ix_calibration_strategy_time`. No PK / no hypertable (mirrors `signals`).
+- **Store** (`app/ingestion/store.py`): `insert_calibration` (batch) + `load_calibration`
+  (oldest-first, optional `strategy` filter) — the read/write seam for the scorer.
+- **Tests**: **+16** (15 offline worked examples covering Brier/log-loss/reliability/Kelly/
+  per-strategy + every guard; +1 DB-gated store roundtrip).
+
+### Verified
+- `cd quant && uv run pytest tests/test_calibration.py -q` → **15 passed**.
+- `cd quant && uv run pytest -q` → **149 passed, 9 skipped** (was 134+8; +15 offline, +1
+  DB-gated skip; no regressions).
+- With `EDGE_TEST_DATABASE_URL=…edge_test` → **158 passed** (incl. the calibration roundtrip:
+  `estimate`/`price` exact `Decimal`, `outcome` int 0/1, `strategy` persists, time-ordered
+  load + strategy filter).
+- `uv run alembic upgrade head` → `0003_price_signals → 0004_calibration`; `\d calibration`
+  confirms the NOT-NULL columns (no `strategy` default), `numeric` money, `smallint`
+  outcome, the CHECK, and both DESC indexes. `downgrade -1` drops it, `upgrade head`
+  restores — clean roundtrip.
+
+### Money-math / correctness decisions (carry forward)
+- **Brier** = `mean((estimate − outcome)²)` — single-class binary, exact in `Decimal`.
+  Anchors: all `p=0.5` → `0.25`; `[0.9,0.9,0.1,0.1]/[1,0,0,1]` → `0.41`.
+- **Log-loss** = `−mean(y·ln(p)+(1−y)·ln(1−p))`, natural log via `Decimal.ln()`. `p` clipped
+  **once** to `[eps, 1−eps]` (`eps=1e-12`, same clipped value in both terms) so `ln(0)`
+  can't fire at `p∈{0,1}`; computed inside `localcontext(prec=50)` so the result doesn't
+  depend on the caller's context. **No float, no `math.log`.** Anchors (quantized 6 dp):
+  all `0.5` → `ln 2 = 0.693147`; the set → `−ln(0.09)/2 = 1.203973`; clip branch
+  `p=0,outcome=1` → `12·ln 10 = 27.631021`.
+- **Reliability**: equal-width deciles, `bin = min(int(estimate·n_bins), n_bins−1)`
+  (`estimate` stays `Decimal` end-to-end; `1.0` → last/closed bin). **All** bins returned;
+  empty bins are `count=0`, `claimed=realized=None` (never fabricate a frequency).
+- **Kelly adjustment — shrink-only, aggregate**: over `estimate ≥ 0.7` (= bins 7–9),
+  `multiplier = clamp(realized_avg/claimed_avg, 0, 1)`, `adjusted_frac = 0.25·multiplier`.
+  **Invariant `adjusted_frac ≤ base_frac`** — underconfidence clamps to 1 (no change), it
+  can never *raise* risk. Zero high-confidence records → all diagnostics `None` (no
+  evidence ≠ calibrated). `worst_bin_multiplier` exposed as a diagnostic. Worked: ten
+  `p=0.8`, six win → `0.6/0.8 = 0.75` → `adjusted_frac 0.1875`.
+- **Per-strategy metrics are POOLED**, not mean-of-means (pinned by a split test: unequal
+  groups give overall `0.1875` vs the wrong `0.125`).
+- `outcome` is a **label, not money** → `SmallInteger` + CHECK; `estimate`/`price` stay
+  unbounded NUMERIC↔Decimal. `strategy` is free-form `Text` (any producer tag), **no
+  server_default** (a default would silently mislabel rows — unlike `signals`, calibration
+  always supplies it).
+
+### Decisions locked this slice
+- **Math + persistence only** — no resolution-watcher/poller, no `GET /calibration`, no
+  Redis, no producer wiring (mirrors how each math module shipped before its scanner). The
+  store functions are the seam; the write path is proven by the DB-gated roundtrip.
+- `CalibrationParams` knobs are **function defaults** (range-validated), not `EDGE_*` knobs
+  yet — they graduate when a scoring endpoint/scanner lands.
+- `calibration` is a **regular table** (one row per resolution; sparser than `signals`), no
+  hypertable, no PK.
+
 ## What's next
+- **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each
+  to its prior estimate(s), and writes `calibration` rows; then surface `summarize` (e.g.
+  `GET /calibration`) and feed `suggest_kelly_fraction`'s `adjusted_frac` into the sizing
+  knobs. Depends on trades/resolution ingestion + the fair-value `p` source.
 - **Trades ingestion**: Data API `/trades` client + `trades` hypertable + poll trade prints.
 - **Category resolution**: Gamma `/markets` frequently omits `category` (observed NULL in the
   smoke run). Derive it from `events[].tags[]` so the fee table (crypto/politics/…) can key on it.

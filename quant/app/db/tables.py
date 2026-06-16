@@ -84,3 +84,25 @@ signals = sa.Table(
 sa.Index("ix_signals_market_time", signals.c.market_id, signals.c.time.desc())
 sa.Index("ix_signals_time", signals.c.time.desc())
 sa.Index("ix_signals_strategy_time", signals.c.strategy, signals.c.time.desc())
+
+# Calibration journal — one resolved prediction per row: the probability we claimed
+# (``estimate``), the market price we saw (``price``), and the realized ``outcome`` (0/1),
+# tagged by the producing ``strategy``. A *regular* table like ``signals`` (even sparser:
+# one row per resolution), no PK. ``estimate``/``price`` are unbounded NUMERIC (Decimal);
+# ``outcome`` is a label not money, so SmallInteger + a CHECK. ``strategy`` is always
+# supplied (NOT NULL, no server_default — a default would silently mislabel rows).
+calibration = sa.Table(
+    "calibration",
+    metadata,
+    sa.Column("time", sa.TIMESTAMP(timezone=True), nullable=False),
+    sa.Column("market_id", sa.Text, nullable=False),
+    sa.Column("condition_id", sa.Text, nullable=False),
+    sa.Column("strategy", sa.Text, nullable=False),
+    sa.Column("estimate", sa.Numeric, nullable=False),  # claimed probability p
+    sa.Column("price", sa.Numeric, nullable=False),  # market YES price m at the time
+    sa.Column("outcome", sa.SmallInteger, nullable=False),  # 1 = resolved YES, 0 = NO
+    sa.CheckConstraint("outcome IN (0, 1)", name="ck_calibration_outcome"),
+)
+
+sa.Index("ix_calibration_time", calibration.c.time.desc())
+sa.Index("ix_calibration_strategy_time", calibration.c.strategy, calibration.c.time.desc())

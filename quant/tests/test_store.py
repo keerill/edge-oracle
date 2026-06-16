@@ -17,11 +17,13 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.db.tables import calibration as calibration_table
 from app.db.tables import markets as markets_table
 from app.db.tables import metadata
 from app.db.tables import quotes as quotes_table
 from app.db.tables import signals as signals_table
 from app.ingestion import store
+from app.models.calibration import CalibrationRecord
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 from app.models.signal import ArbSignal, ExtremeCorrectionSignal, FavouriteLongshotSignal
@@ -258,3 +260,48 @@ async def test_load_tracked_markets_returns_only_tracked(sessionmaker):
     assert loaded[0].condition_id == "c1"
     assert loaded[0].yes_token_id == "111"
     assert loaded[0].no_token_id == "222"
+
+
+def _calib(*, estimate, price, outcome, strategy, t_min) -> CalibrationRecord:
+    return CalibrationRecord(
+        time=datetime(2026, 6, 16, 12, t_min, tzinfo=timezone.utc),
+        market_id="m1",
+        condition_id="c1",
+        strategy=strategy,
+        estimate=Decimal(estimate),
+        price=Decimal(price),
+        outcome=outcome,
+    )
+
+
+async def test_insert_calibration_roundtrip(sessionmaker):
+    recs = [
+        _calib(estimate="0.90", price="0.85", outcome=1, strategy="extreme_correction", t_min=0),
+        _calib(estimate="0.20", price="0.25", outcome=0, strategy="favourite_longshot", t_min=1),
+    ]
+    async with sessionmaker() as s:
+        n = await store.insert_calibration(s, recs)
+        await s.commit()
+    assert n == 2
+
+    # Raw-row guard: estimate/price come back as exact Decimal, outcome as a 0/1 int.
+    async with sessionmaker() as s:
+        rows = (
+            await s.execute(sa.select(calibration_table).order_by(calibration_table.c.time))
+        ).mappings().all()
+    assert isinstance(rows[0]["estimate"], Decimal)
+    assert rows[0]["estimate"] == Decimal("0.90")
+    assert rows[0]["price"] == Decimal("0.85")
+    assert isinstance(rows[0]["outcome"], int)
+    assert rows[0]["outcome"] == 1
+    assert rows[1]["outcome"] == 0
+
+    # load_calibration rebuilds records oldest-first and filters by strategy.
+    async with sessionmaker() as s:
+        loaded = await store.load_calibration(s)
+        only = await store.load_calibration(s, strategy="favourite_longshot")
+    assert [r.strategy for r in loaded] == ["extreme_correction", "favourite_longshot"]
+    assert isinstance(loaded[0], CalibrationRecord)
+    assert loaded[0].estimate == Decimal("0.90")
+    assert [r.strategy for r in only] == ["favourite_longshot"]
+    assert only[0].outcome == 0

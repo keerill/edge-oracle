@@ -13,9 +13,11 @@ from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.tables import calibration as calibration_table
 from app.db.tables import markets as markets_table
 from app.db.tables import quotes as quotes_table
 from app.db.tables import signals as signals_table
+from app.models.calibration import CalibrationRecord
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 from app.models.signal import Signal
@@ -125,3 +127,39 @@ async def insert_signals(session: AsyncSession, signals: Sequence[Signal]) -> in
     rows = [s.model_dump() for s in signals]
     await session.execute(insert(signals_table), rows)
     return len(rows)
+
+
+async def insert_calibration(
+    session: AsyncSession, records: Sequence[CalibrationRecord]
+) -> int:
+    """Append resolved-prediction records to the calibration journal (single batch)."""
+    if not records:
+        return 0
+    rows = [r.model_dump() for r in records]
+    await session.execute(insert(calibration_table), rows)
+    return len(rows)
+
+
+async def load_calibration(
+    session: AsyncSession, strategy: str | None = None
+) -> list[CalibrationRecord]:
+    """Reload the calibration journal (optionally one strategy), oldest first — the read
+    counterpart to ``insert_calibration``, consumed by the calibration scoring."""
+    stmt = select(calibration_table)
+    if strategy is not None:
+        stmt = stmt.where(calibration_table.c.strategy == strategy)
+    rows = (
+        await session.execute(stmt.order_by(calibration_table.c.time))
+    ).mappings().all()
+    return [
+        CalibrationRecord(
+            time=r["time"],
+            market_id=r["market_id"],
+            condition_id=r["condition_id"],
+            strategy=r["strategy"],
+            estimate=r["estimate"],
+            price=r["price"],
+            outcome=r["outcome"],
+        )
+        for r in rows
+    ]

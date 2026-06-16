@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     # ``python -m app.ingestion.scanner`` instead. Set True to poll on startup.
     run_poller_on_startup: bool = False
 
+    # --- Observability: structured logging -----------------------------------
+    # Every entrypoint calls observability.logging.configure_logging(service). JSON to
+    # stdout by default; EDGE_LOG_JSON=false restores the human format for local tailing.
+    log_level: str = "INFO"
+    log_json: bool = True
+
     @property
     def allowlist_ids(self) -> tuple[str, ...]:
         """Parse the comma-separated allowlist into a tuple of condition ids."""

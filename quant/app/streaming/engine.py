@@ -27,6 +27,7 @@ from app.db.engine import get_sessionmaker
 from app.ingestion import store as store_mod
 from app.math.arb import ArbParams, evaluate_market
 from app.models.advisor import AdvisedSignal
+from app.observability.logging import configure_logging
 from app.streaming.book_state import BookStore
 from app.streaming.redis_bus import publish_signal
 from app.advisor.view import advise
@@ -259,9 +260,7 @@ async def run_mock_forever(
 
 def main() -> None:
     """CLI: ``python -m app.streaming.engine`` (live) or ``... --mock`` (synthetic dev feed)."""
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
+    configure_logging("quant.streaming")
     if len(sys.argv) > 1 and sys.argv[1] == "--mock":
         asyncio.run(run_mock_forever())
     else:

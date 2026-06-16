@@ -34,6 +34,7 @@ from app.models.book import BookLevel, OrderBook
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 from app.models.signal import ArbSignal, ExtremeCorrectionSignal
+from app.observability.logging import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -270,9 +271,7 @@ def main() -> None:
     The resolutions file is required — without market outcomes there is nothing to score
     (resolution ingestion is a future slice). Run with no argument to confirm wiring (it
     logs an empty result and the missing-feed warning)."""
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
+    configure_logging("quant.backtest")
     if len(sys.argv) > 1:
         resolutions = _load_resolutions(sys.argv[1])
     else:

@@ -25,6 +25,7 @@ from app.db.tables import markets as markets_table
 from app.ingestion import store, transform
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
+from app.observability.logging import configure_logging
 from app.polymarket.clob_client import ClobClient
 from app.polymarket.gamma_client import GammaClient
 from app.polymarket.http import make_http_client
@@ -215,9 +216,7 @@ async def _run_once() -> None:
 
 def main() -> None:
     """CLI: ``python -m app.ingestion.scanner`` (one cycle) or ``... loop`` (forever)."""
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
+    configure_logging("quant.scanner")
     mode = sys.argv[1] if len(sys.argv) > 1 else "once"
     if mode == "loop":
         asyncio.run(run_poller_forever())

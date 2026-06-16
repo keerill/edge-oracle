@@ -70,6 +70,16 @@ class BetCandidate(BaseModel):
         return self
 
 
+class MarketResolution(BaseModel):
+    """How a market resolved — the explicit outcome input to the backtest (resolution
+    ingestion is a later slice). ``outcome`` is 1 if YES resolved true, else 0."""
+
+    model_config = ConfigDict(frozen=True)
+
+    outcome: Literal[0, 1]
+    resolve_time: datetime
+
+
 class ClosedBet(BaseModel):
     """A bet that was taken and has resolved — its realized P&L is final."""
 

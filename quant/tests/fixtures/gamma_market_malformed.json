@@ -1,0 +1,11 @@
+{
+  "id": "509999",
+  "question": "Malformed market — missing conditionId",
+  "slug": "malformed-market-missing-conditionid",
+  "outcomes": ["Yes", "No"],
+  "outcomePrices": "[\"0.5\", \"0.5\"]",
+  "clobTokenIds": "[\"1\", \"2\"]",
+  "enableOrderBook": true,
+  "active": true,
+  "closed": false
+}

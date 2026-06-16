@@ -102,6 +102,17 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     metrics_port: int = 9100
 
+    # --- Observability: alerts -----------------------------------------------
+    # The three named alerts (WS drop / drawdown breach / calibration drift) are published to
+    # this Redis channel (web SSE -> dashboard toast) and captured to Sentry. Thresholds are
+    # Decimal fractions (exact). The monitor loop evaluates drawdown + drift every cadence; the
+    # WS-drop alert is event-driven in the streaming engine.
+    alerts_channel: str = "edge:alerts"
+    drawdown_alert_threshold: Decimal = Decimal("0.20")  # peak-to-trough fraction
+    calibration_drift_threshold: Decimal = Decimal("0.05")  # claimed-realized gap
+    ws_drop_alert_threshold: int = 1  # reconnects before alerting (1 = any drop)
+    monitor_interval_s: float = 60.0
+
     @property
     def allowlist_ids(self) -> tuple[str, ...]:
         """Parse the comma-separated allowlist into a tuple of condition ids."""

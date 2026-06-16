@@ -281,6 +281,85 @@ fail).
 - `calibration` is a **regular table** (one row per resolution; sparser than `signals`), no
   hypertable, no PK.
 
+## Slice: Backtest harness over stored historical prices  ✅ done (2026-06-16)
+
+Deterministic replay of the stored price history that finally answers "does following the
+signals make money?" Replays `quotes` time-ordered (strict, no look-ahead), sizes each
+signal with the existing Kelly module, simulates fills at the price actually payable (incl.
+spread + slippage + gas), tracks bankroll event-driven, and reports return / hit rate /
+max drawdown / Sharpe-like (overall + per strategy) — plus a Monte-Carlo pass that resamples
+outcomes with a model-error perturbation for a final-bankroll distribution. **Advisor only —
+math + a replay reader; outcomes are an explicit input (resolution ingestion is a later
+slice).** Tests are the spec (TDD: written first, watched fail).
+
+### What's done
+- **Pure math** (`app/math/backtest.py`): `realized_pnl` (all costs baked into the
+  directional fill; arb P&L is the outcome-independent `net_edge*set_size`), the metric
+  helpers (`total_return`, `max_drawdown`, `hit_rate`, `sharpe_like`), `simulate` (the
+  causal event loop), and `monte_carlo`. **Reuses `position_size` unchanged.** No I/O, no
+  clock, no `Settings`.
+- **Models** (`app/models/backtest.py`): frozen `BetCandidate` (entry decision, stake
+  decided later), `ClosedBet`, `EquityPoint`, `StrategyBreakdown`, `BacktestResult`,
+  `MonteCarloResult`, `MarketResolution` (the outcome input), and `BacktestParams` (the
+  pure mirror of the `EDGE_*` knobs).
+- **Replay adapter** (`app/backtest/engine.py`): `build_candidates` (walk quotes, rebuild a
+  1-level book from top-of-book, run `extreme_correction` + `set_arb`, first entry per
+  (market, strategy)), `run_backtest_once` (DB read → candidates → `simulate`), and a CLI
+  `python -m app.backtest.engine <resolutions.json>` (boundary-validated outcomes).
+- **Store** (`app/ingestion/store.py`): `load_quotes` — time-ordered reader with optional
+  token filter and half-open `[start, end)` window (read counterpart to `insert_quotes`).
+- **Config** (`app/config.py`): `EDGE_BACKTEST_INITIAL_BANKROLL`, `EDGE_KELLY_{FRAC,CAP}`,
+  `EDGE_CORR_CAP_FRAC`, `EDGE_MODEL_ERROR_MARGIN`, `EDGE_MC_{SIGMA,SIMS,SEED}` (Decimal money).
+- **Tests**: **+27** (19 pure backtest worked examples incl. a win/loss/overlap known-answer,
+  risk-free arb, edge-gate rejection, the correlation-cap clamp, a no-look-ahead invariance
+  check, and MC determinism/known-answer; 6 offline `build_candidates`; +1 DB-gated
+  `load_quotes`; +1 DB-gated end-to-end arb replay).
+
+### Verified
+- `cd quant && uv run pytest tests/test_backtest.py tests/test_backtest_engine.py -q` →
+  **25 passed, 1 skipped** (the engine DB test skips without a DB).
+- `cd quant && uv run pytest -q` → **174 passed, 11 skipped** (no regressions).
+- With `EDGE_TEST_DATABASE_URL=…edge_test` → **185 passed** (incl. `load_quotes` ordering/
+  window/Decimal guard and the seeded arb replayed through the store end-to-end to **1000.03**).
+- **Live smoke** `uv run python -m app.backtest.engine /tmp/edge_resolutions.json` over the
+  dev DB's stored quotes → replayed 5 markets, placed **2** `extreme_correction` bets (the
+  deep longshots that cleared the cost gate), both lost → final **961.14**, return **−3.89%**,
+  max drawdown 3.89% — costs baked in (most correction edges were gated out, as expected).
+
+### Money-math / correctness decisions (carry forward)
+- **No look-ahead** is structural: `simulate` merges entry + resolution events, processes
+  them in time order with **resolutions before entries on ties** (free capital first), so
+  entry sizing can only see capital freed by resolutions strictly *before* the entry. A
+  candidate is built from one tick's quote and resolves only at `resolve_time`. Pinned by a
+  test: flipping a later outcome leaves all earlier stakes unchanged.
+- **Costs are in the result, not just the gate.** Directional fill price is all-in
+  (`m_side + half_spread + slippage + gas`); a win pays $1/share, a loss pays $0. Arb P&L is
+  the locked `net_edge*set_size` (already net of gas+slippage). Sizing still uses the existing
+  `position_size` (gate on `p_lo`, Kelly on the ask `m+half_spread`), so realized return is
+  ≥-conservative vs the gate.
+- **Bankroll = available cash** (one unambiguous base for Kelly, the hard cap, and the
+  correlation cap). Equity sampled at resolutions equals `initial + cumulative realized P&L`.
+- **Correlation cap is streaming**: open exposure per `tag` (market `category`, else the
+  condition id) may not exceed `corr_cap_frac * cash` — the streaming analogue of the batch
+  `cap_correlated_stakes` (which needs all positions at once).
+- **Directional probability source**: `extreme_correction.fair_value` is `p_yes`;
+  `p_side = p_yes` (buy_yes) or `1 - p_yes` (buy_no); `p_lo_side = p_side - model_error_margin`
+  (the CI lower bound). `favourite_longshot` has no probability → excluded from sizing.
+- **Monte-Carlo**: each market's YES outcome ~ `Bernoulli(clip(p_yes + N(0, mc_sigma), 0, 1))`,
+  then the full causal `simulate` re-runs (sizing adapts per path). The Gaussian is the only
+  float and it only ever decides a 0/1 outcome — **the bankroll arithmetic stays exact
+  Decimal**. `rng` is injected and seeded for determinism.
+
+### Decisions locked this slice
+- **One entry per (market, strategy)** — the first qualifying tick, held to resolution
+  (re-entry / exit policies are future work).
+- **Arb is taken whole or skipped** (no fractional sets): funded only when its set cost fits
+  available cash and the per-tag allowance.
+- **Top-of-book only** is all the stored depth, so `set_arb` is priced from a reconstructed
+  1-level book (depth-aware arb pairs with a full-book history slice, deferred).
+- **Outcomes are an explicit `resolutions` input** (no resolution-watcher this slice); the
+  CLI reads a boundary-validated JSON file. `BacktestParams` knobs are the `EDGE_*` mirror.
+
 ## What's next
 - **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each
   to its prior estimate(s), and writes `calibration` rows; then surface `summarize` (e.g.
@@ -301,7 +380,9 @@ fail).
   into the future fair-value/Kelly gate.
 - **Signals plumbing**: publish signals to Redis + `GET /signals`; merge the signal scan into
   the ingestion cycle to **reuse the books it already fetches** (drop the standalone re-fetch).
-- **Backtest**: deterministic replay over the stored `quotes` ticks.
+- **Backtest, next steps**: feed real `resolutions` from the resolution-watcher (above);
+  surface results via `GET /backtest`; add re-entry/exit policies and depth-aware arb once a
+  full-book history exists; wire `favourite_longshot` once it has a probability source.
 - **Web**: Next.js BFF + dashboard (separate slice).
 
 ## Open questions / observations

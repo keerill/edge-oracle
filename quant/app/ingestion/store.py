@@ -9,14 +9,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import func, insert, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.tables import markets as markets_table
 from app.db.tables import quotes as quotes_table
+from app.db.tables import signals as signals_table
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
+from app.models.signal import ArbSignal
 
 # Market columns updated on conflict (everything except the PK and created_at).
 _MARKET_UPDATE_COLS = (
@@ -78,4 +80,43 @@ async def insert_quotes(session: AsyncSession, quotes: Sequence[QuoteSnapshot]) 
         return 0
     rows = [q.model_dump() for q in quotes]
     await session.execute(insert(quotes_table), rows)
+    return len(rows)
+
+
+async def load_tracked_markets(session: AsyncSession) -> list[Market]:
+    """Reload the currently-tracked universe from the DB (no ``outcomes`` persisted).
+
+    The read counterpart to ``upsert_markets`` — consumed by the signal engine to scan
+    over the stored universe.
+    """
+    rows = (
+        await session.execute(
+            select(markets_table).where(markets_table.c.tracked.is_(True))
+        )
+    ).mappings().all()
+    return [
+        Market(
+            market_id=r["market_id"],
+            condition_id=r["condition_id"],
+            question=r["question"],
+            slug=r["slug"],
+            category=r["category"],
+            event_id=r["event_id"],
+            yes_token_id=r["yes_token_id"],
+            no_token_id=r["no_token_id"],
+            enable_order_book=r["enable_order_book"],
+            active=r["active"],
+            closed=r["closed"],
+            liquidity=r["liquidity"],
+        )
+        for r in rows
+    ]
+
+
+async def insert_signals(session: AsyncSession, signals: Sequence[ArbSignal]) -> int:
+    """Append detected arbitrage opportunities in a single batch insert."""
+    if not signals:
+        return 0
+    rows = [s.model_dump() for s in signals]
+    await session.execute(insert(signals_table), rows)
     return len(rows)

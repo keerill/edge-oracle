@@ -52,3 +52,26 @@ quotes = sa.Table(
 )
 
 sa.Index("ix_quotes_token_time", quotes.c.token_id, quotes.c.time.desc())
+
+# Detected set-arb opportunities (one row per flagged market per scan). A *regular*
+# table, not a hypertable: opportunities are sparse and append-only, so time-chunking
+# buys little. No PK (mirrors ``quotes``); indexed by time for "latest opportunities"
+# and by (market_id, time) for a single market's history. All money is unbounded NUMERIC.
+signals = sa.Table(
+    "signals",
+    metadata,
+    sa.Column("time", sa.TIMESTAMP(timezone=True), nullable=False),
+    sa.Column("market_id", sa.Text, nullable=False),
+    sa.Column("condition_id", sa.Text, nullable=False),
+    sa.Column("kind", sa.Text, nullable=False),  # "long_set" | "short_set"
+    sa.Column("yes_price", sa.Numeric, nullable=False),
+    sa.Column("no_price", sa.Numeric, nullable=False),
+    sa.Column("set_size", sa.Numeric, nullable=False),
+    sa.Column("gross_edge", sa.Numeric, nullable=False),
+    sa.Column("estimated_costs", sa.Numeric, nullable=False),
+    sa.Column("net_edge", sa.Numeric, nullable=False),
+    sa.Column("hypothetical_pnl", sa.Numeric, nullable=False),
+)
+
+sa.Index("ix_signals_market_time", signals.c.market_id, signals.c.time.desc())
+sa.Index("ix_signals_time", signals.c.time.desc())

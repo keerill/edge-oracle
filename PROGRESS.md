@@ -310,16 +310,16 @@ slice).** Tests are the spec (TDD: written first, watched fail).
   token filter and half-open `[start, end)` window (read counterpart to `insert_quotes`).
 - **Config** (`app/config.py`): `EDGE_BACKTEST_INITIAL_BANKROLL`, `EDGE_KELLY_{FRAC,CAP}`,
   `EDGE_CORR_CAP_FRAC`, `EDGE_MODEL_ERROR_MARGIN`, `EDGE_MC_{SIGMA,SIMS,SEED}` (Decimal money).
-- **Tests**: **+27** (19 pure backtest worked examples incl. a win/loss/overlap known-answer,
+- **Tests**: **+29** (21 pure backtest worked examples incl. a win/loss/overlap known-answer,
   risk-free arb, edge-gate rejection, the correlation-cap clamp, a no-look-ahead invariance
-  check, and MC determinism/known-answer; 6 offline `build_candidates`; +1 DB-gated
-  `load_quotes`; +1 DB-gated end-to-end arb replay).
+  check, the `resolve > entry` guard, and MC determinism/seed/known-answer; 6 offline
+  `build_candidates`; +1 DB-gated `load_quotes`; +1 DB-gated end-to-end arb replay).
 
 ### Verified
 - `cd quant && uv run pytest tests/test_backtest.py tests/test_backtest_engine.py -q` →
-  **25 passed, 1 skipped** (the engine DB test skips without a DB).
-- `cd quant && uv run pytest -q` → **174 passed, 11 skipped** (no regressions).
-- With `EDGE_TEST_DATABASE_URL=…edge_test` → **185 passed** (incl. `load_quotes` ordering/
+  **27 passed, 1 skipped** (the engine DB test skips without a DB).
+- `cd quant && uv run pytest -q` → **176 passed, 11 skipped** (no regressions).
+- With `EDGE_TEST_DATABASE_URL=…edge_test` → **187 passed** (incl. `load_quotes` ordering/
   window/Decimal guard and the seeded arb replayed through the store end-to-end to **1000.03**).
 - **Live smoke** `uv run python -m app.backtest.engine /tmp/edge_resolutions.json` over the
   dev DB's stored quotes → replayed 5 markets, placed **2** `extreme_correction` bets (the
@@ -359,6 +359,14 @@ slice).** Tests are the spec (TDD: written first, watched fail).
   1-level book (depth-aware arb pairs with a full-book history slice, deferred).
 - **Outcomes are an explicit `resolutions` input** (no resolution-watcher this slice); the
   CLI reads a boundary-validated JSON file. `BacktestParams` knobs are the `EDGE_*` mirror.
+- **Look-ahead review** (subagent, money-math + look-ahead only): no look-ahead leak found
+  (signals never see the outcome; sizing never sees `resolutions`). Two gaps fixed —
+  `BetCandidate` now rejects `resolve_time ≤ entry_time` (a degenerate candidate would have
+  let `simulate`'s tie ordering drop the resolution and lock the stake), and `monte_carlo`
+  seeds its rng from `params.mc_seed` when none is injected. Two findings declined as
+  intentional & spec-mandated: Kelly sizes on `m+half_spread` with slippage+gas in the gate
+  only (CLAUDE.md), and the bankroll base is available cash (the solvency-safe choice —
+  equity-base could over-commit and drive cash negative).
 
 ## What's next
 - **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each

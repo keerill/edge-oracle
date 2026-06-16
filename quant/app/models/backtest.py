@@ -53,6 +53,13 @@ class BetCandidate(BaseModel):
 
     @model_validator(mode="after")
     def _require_fields_for_kind(self) -> BetCandidate:
+        if self.resolve_time <= self.entry_time:
+            # A bet must be entered strictly before it resolves; otherwise the simulation's
+            # (resolution-before-entry on ties) ordering would drop the resolution and lock
+            # the stake forever.
+            raise ValueError(
+                f"resolve_time ({self.resolve_time}) must be after entry_time ({self.entry_time})"
+            )
         if self.kind == "directional":
             missing = [
                 n

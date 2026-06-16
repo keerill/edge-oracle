@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from app.math.backtest import (
     hit_rate,
@@ -110,6 +111,18 @@ def _closed(strategy: str, stake: str, pnl: str) -> ClosedBet:
         pnl=p,
         won=p > 0,
     )
+
+
+# --------------------------------------------------------------------------- model guards
+
+
+def test_bet_candidate_rejects_resolve_at_or_before_entry():
+    # A bet must be entered strictly before it resolves; otherwise simulate's event
+    # ordering would drop the resolution and lock the stake forever.
+    with pytest.raises(ValidationError):
+        _arb(entry=2, resolve=1)
+    with pytest.raises(ValidationError):
+        _arb(entry=1, resolve=1)
 
 
 # --------------------------------------------------------------------------- realized_pnl
@@ -284,6 +297,15 @@ def test_monte_carlo_certain_winner_has_a_degenerate_distribution():
         assert v == Decimal("1150")
     assert res.prob_loss == Decimal("0")
     assert res.median_max_drawdown == Decimal("0")
+
+
+def test_monte_carlo_defaults_its_rng_from_params_seed():
+    # No injected rng -> seeds from params.mc_seed, so it matches an explicit same-seed rng.
+    params = BacktestParams(mc_sigma=Decimal("0.05"), mc_sims=100)
+    cand = _directional(p_yes="0.50", p_side="0.50", p_lo_side="0.30")
+    auto = monte_carlo([cand], params)
+    explicit = monte_carlo([cand], params, rng=random.Random(params.mc_seed))
+    assert auto == explicit
 
 
 def test_monte_carlo_is_deterministic_for_a_fixed_seed():

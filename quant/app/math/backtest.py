@@ -241,7 +241,7 @@ def monte_carlo(
     params: BacktestParams,
     *,
     base_outcomes: Mapping[str, int] | None = None,
-    rng: random.Random,
+    rng: random.Random | None = None,
 ) -> MonteCarloResult:
     """Resample outcomes ``mc_sims`` times and report the distribution of final bankroll.
 
@@ -249,9 +249,13 @@ def monte_carlo(
     the model's own probability *plus* a Gaussian model-error perturbation — then the full
     causal :func:`simulate` is re-run (sizing adapts to each simulated bankroll path).
     Markets with no directional ``p_yes`` (arb-only, where the outcome can't change P&L)
-    fall back to ``base_outcomes`` (default 0). ``rng`` is injected for determinism; the
-    float perturbation only ever decides a 0/1 outcome, so the bankroll stays exact Decimal.
+    fall back to ``base_outcomes`` (default 0). ``rng`` may be injected (for tests); when
+    omitted it is seeded from ``params.mc_seed`` so determinism follows from the params
+    alone. The float perturbation only ever decides a 0/1 outcome, so the bankroll stays
+    exact Decimal.
     """
+    if rng is None:
+        rng = random.Random(params.mc_seed)
     base_outcomes = base_outcomes or {}
     p_by_condition: dict[str, Decimal] = {
         c.condition_id: c.p_yes for c in candidates if c.kind == "directional"

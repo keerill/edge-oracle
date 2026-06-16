@@ -1,0 +1,47 @@
+"""Minimal FastAPI app: health check + optional lifespan-launched poller.
+
+The poller is started here ONLY when ``EDGE_RUN_POLLER_ON_STARTUP=true``. By default
+the app is quiet and the poller is run as a standalone process
+(``python -m app.ingestion.scanner``). No signals/markets routers in this slice.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+from collections.abc import AsyncIterator
+
+from fastapi import FastAPI
+
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    task: asyncio.Task[None] | None = None
+    if settings.run_poller_on_startup:
+        # Imported lazily so the app (and tests) don't require DB/clients unless
+        # the poller is explicitly enabled.
+        from app.ingestion.scanner import run_poller_forever
+
+        logger.info("starting background poller on app startup")
+        task = asyncio.create_task(run_poller_forever())
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+app = FastAPI(title="EdgeOracle quant", version="0.1.0", lifespan=lifespan)
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}

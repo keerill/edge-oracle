@@ -30,6 +30,7 @@ from app.models.book import OrderBook
 from app.models.market import Market
 from app.models.signal import ArbSignal
 from app.observability.logging import configure_logging
+from app.observability.metrics import SIGNALS, start_metrics_server
 from app.observability.sentry import init_sentry
 from app.polymarket.clob_client import ClobClient
 from app.polymarket.http import make_http_client
@@ -149,6 +150,7 @@ async def run_signal_poller(
     while max_cycles is None or cycle < max_cycles:
         try:
             result = await run_signal_scan_once(clob, sessionmaker, settings, now=now)
+            SIGNALS.labels("set_arb", "scan").inc(result.signals)
             logger.info(
                 "signal scan complete: markets=%d signals=%d",
                 result.markets,
@@ -187,6 +189,9 @@ def main() -> None:
     """CLI: ``python -m app.signals.engine`` (one cycle) or ``... loop`` (forever)."""
     configure_logging("quant.signals")
     init_sentry("quant.signals")
+    settings = get_settings()
+    if settings.metrics_enabled:
+        start_metrics_server(settings.metrics_port)
     mode = sys.argv[1] if len(sys.argv) > 1 else "once"
     if mode == "loop":
         asyncio.run(run_signal_poller_forever())

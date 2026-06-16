@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     sentry_dsn: str | None = None
     sentry_environment: str = "dev"
 
+    # --- Observability: Prometheus metrics -----------------------------------
+    # The FastAPI app serves /metrics; each standalone CLI exposes its own endpoint on
+    # EDGE_METRICS_PORT. Running several CLIs on one host needs distinct ports (9100 poller,
+    # 9101 signals, 9102 streaming, 9103 monitor) — a bind clash is logged, never fatal.
+    metrics_enabled: bool = True
+    metrics_port: int = 9100
+
     @property
     def allowlist_ids(self) -> tuple[str, ...]:
         """Parse the comma-separated allowlist into a tuple of condition ids."""

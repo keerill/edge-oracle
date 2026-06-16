@@ -28,6 +28,13 @@ from app.ingestion import store as store_mod
 from app.math.arb import ArbParams, evaluate_market
 from app.models.advisor import AdvisedSignal
 from app.observability.logging import configure_logging
+from app.observability.metrics import (
+    SIGNALS,
+    WS_CONNECTS,
+    WS_DROPS,
+    WS_UP,
+    start_metrics_server,
+)
 from app.observability.sentry import init_sentry
 from app.streaming.book_state import BookStore
 from app.streaming.redis_bus import publish_signal
@@ -93,6 +100,7 @@ async def _on_market(
         bankroll=bankroll,
     )
     await publish(advised)
+    SIGNALS.labels(advised.strategy, "stream").inc()
 
 
 async def run_stream(
@@ -156,6 +164,8 @@ async def connect_clob_ws(
             async with websockets.connect(url) as ws:
                 await ws.send(subscribe)
                 logger.info("CLOB WS connected: %d tokens subscribed", len(token_ids))
+                WS_CONNECTS.inc()
+                WS_UP.set(1)
                 async for raw in ws:
                     try:
                         payload = json.loads(raw)
@@ -169,6 +179,8 @@ async def connect_clob_ws(
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - reconnect on any transport/protocol error
+            WS_DROPS.inc()
+            WS_UP.set(0)
             logger.warning("CLOB WS dropped (%r); reconnecting in %ss", exc, reconnect_delay_s)
             await asyncio.sleep(reconnect_delay_s)
 
@@ -263,6 +275,9 @@ def main() -> None:
     """CLI: ``python -m app.streaming.engine`` (live) or ``... --mock`` (synthetic dev feed)."""
     configure_logging("quant.streaming")
     init_sentry("quant.streaming")
+    settings = get_settings()
+    if settings.metrics_enabled:
+        start_metrics_server(settings.metrics_port)
     if len(sys.argv) > 1 and sys.argv[1] == "--mock":
         asyncio.run(run_mock_forever())
     else:

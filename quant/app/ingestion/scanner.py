@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,6 +27,13 @@ from app.ingestion import store, transform
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 from app.observability.logging import configure_logging
+from app.observability.metrics import (
+    POLLER_LAST_SUCCESS_TS,
+    POLLER_QUOTES,
+    POLLER_SCAN_DURATION,
+    POLLER_SCANS,
+    start_metrics_server,
+)
 from app.observability.sentry import init_sentry
 from app.polymarket.clob_client import ClobClient
 from app.polymarket.gamma_client import GammaClient
@@ -170,10 +178,15 @@ async def run_poller(
             last_discovery_at is None
             or (current - last_discovery_at).total_seconds() >= settings.discovery_interval_s
         )
+        scan_start = time.perf_counter()
         try:
             result = await run_scan_once(
                 gamma, clob, sessionmaker, settings, do_discovery=do_discovery, now=now
             )
+            POLLER_SCAN_DURATION.observe(time.perf_counter() - scan_start)
+            POLLER_SCANS.labels("ok").inc()
+            POLLER_LAST_SUCCESS_TS.set(current.timestamp())
+            POLLER_QUOTES.inc(result.quotes)
             if do_discovery:
                 last_discovery_at = current
             logger.info(
@@ -183,6 +196,7 @@ async def run_poller(
                 result.discovered,
             )
         except Exception as exc:  # noqa: BLE001 - never let one tick kill the loop
+            POLLER_SCANS.labels("error").inc()
             logger.exception("scan cycle failed: %r", exc)
 
         cycle += 1
@@ -219,6 +233,9 @@ def main() -> None:
     """CLI: ``python -m app.ingestion.scanner`` (one cycle) or ``... loop`` (forever)."""
     configure_logging("quant.scanner")
     init_sentry("quant.scanner")
+    settings = get_settings()
+    if settings.metrics_enabled:
+        start_metrics_server(settings.metrics_port)
     mode = sys.argv[1] if len(sys.argv) > 1 else "once"
     if mode == "loop":
         asyncio.run(run_poller_forever())

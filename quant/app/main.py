@@ -13,11 +13,12 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from app.api import backtest, calibration, signals
 from app.config import get_settings
 from app.observability.logging import configure_logging
+from app.observability.metrics import render_latest
 from app.observability.sentry import init_sentry
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,12 @@ app = FastAPI(title="EdgeOracle quant", version="0.1.0", lifespan=lifespan)
 app.include_router(signals.router)
 app.include_router(calibration.router)
 app.include_router(backtest.router)
+
+@app.get("/metrics")
+def metrics() -> Response:
+    """Prometheus exposition for the API process (latency + any in-process families)."""
+    body, content_type = render_latest()
+    return Response(body, media_type=content_type)
 
 
 @app.get("/health")

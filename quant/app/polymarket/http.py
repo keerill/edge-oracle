@@ -13,12 +13,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 
 from app.config import Settings
+from app.observability.metrics import HTTP_REQUEST_DURATION
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,23 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
         return None
 
 
+def _host_of(req_or_resp: object) -> str:
+    """Best-effort host label for the latency metric (never raises — it's just a label)."""
+    try:
+        return req_or_resp.url.host or "unknown"  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _request_host(exc: BaseException) -> str:
+    """Host from a transport error's request, if httpx attached one; else ``unknown``."""
+    try:
+        request = exc.request  # type: ignore[attr-defined]  # .request raises if unset
+    except (RuntimeError, AttributeError):
+        return "unknown"
+    return _host_of(request)
+
+
 async def request_with_retry(
     send: Callable[[], Awaitable[httpx.Response]],
     *,
@@ -69,9 +88,13 @@ async def request_with_retry(
     ``raise_for_status`` on a 4xx/5xx that we won't retry, incl. exhausted 429s)."""
     attempt = 0
     while True:
+        start = time.perf_counter()
         try:
             response = await send()
         except httpx.TransportError as exc:  # includes timeouts + network errors
+            HTTP_REQUEST_DURATION.labels(_request_host(exc), "error").observe(
+                time.perf_counter() - start
+            )
             if attempt >= max_retries:
                 raise
             delay = _backoff_delay(attempt, base=base_delay, cap=cap, jitter=jitter, rng=rng)
@@ -82,7 +105,9 @@ async def request_with_retry(
             attempt += 1
             continue
 
+        elapsed = time.perf_counter() - start
         if response.status_code in RETRYABLE_STATUSES and attempt < max_retries:
+            HTTP_REQUEST_DURATION.labels(_host_of(response.request), "retry").observe(elapsed)
             delay = _retry_after_seconds(response)
             if delay is None:
                 delay = _backoff_delay(attempt, base=base_delay, cap=cap, jitter=jitter, rng=rng)
@@ -97,6 +122,9 @@ async def request_with_retry(
             attempt += 1
             continue
 
+        HTTP_REQUEST_DURATION.labels(
+            _host_of(response.request), "ok" if response.is_success else "error"
+        ).observe(elapsed)
         response.raise_for_status()
         return response
 

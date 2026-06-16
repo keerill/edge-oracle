@@ -18,6 +18,7 @@ Money-math rules baked in (see CLAUDE.md and the slice plan):
 
 from __future__ import annotations
 
+import random
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 
@@ -28,6 +29,7 @@ from app.models.backtest import (
     BetCandidate,
     ClosedBet,
     EquityPoint,
+    MonteCarloResult,
     StrategyBreakdown,
 )
 
@@ -225,4 +227,65 @@ def _build_result(
         per_strategy=per_strategy,
         equity_curve=tuple(equity_curve),
         closed_bets=tuple(closed),
+    )
+
+
+def _percentile(sorted_vals: Sequence[Decimal], pct: int) -> Decimal:
+    """Nearest-rank percentile of an already-sorted, non-empty sequence."""
+    idx = min(len(sorted_vals) - 1, (pct * len(sorted_vals)) // 100)
+    return sorted_vals[idx]
+
+
+def monte_carlo(
+    candidates: Sequence[BetCandidate],
+    params: BacktestParams,
+    *,
+    base_outcomes: Mapping[str, int] | None = None,
+    rng: random.Random,
+) -> MonteCarloResult:
+    """Resample outcomes ``mc_sims`` times and report the distribution of final bankroll.
+
+    Each market's YES outcome is drawn ``Bernoulli(clip(p_yes + N(0, mc_sigma), 0, 1))`` —
+    the model's own probability *plus* a Gaussian model-error perturbation — then the full
+    causal :func:`simulate` is re-run (sizing adapts to each simulated bankroll path).
+    Markets with no directional ``p_yes`` (arb-only, where the outcome can't change P&L)
+    fall back to ``base_outcomes`` (default 0). ``rng`` is injected for determinism; the
+    float perturbation only ever decides a 0/1 outcome, so the bankroll stays exact Decimal.
+    """
+    base_outcomes = base_outcomes or {}
+    p_by_condition: dict[str, Decimal] = {
+        c.condition_id: c.p_yes for c in candidates if c.kind == "directional"
+    }
+    condition_ids = sorted({c.condition_id for c in candidates})  # deterministic draw order
+    sigma = float(params.mc_sigma)
+
+    finals: list[Decimal] = []
+    drawdowns: list[Decimal] = []
+    for _ in range(params.mc_sims):
+        outcomes: dict[str, int] = {}
+        for cond in condition_ids:
+            p = p_by_condition.get(cond)
+            if p is None:
+                outcomes[cond] = base_outcomes.get(cond, 0)
+                continue
+            eff = min(1.0, max(0.0, float(p) + rng.gauss(0.0, sigma)))
+            outcomes[cond] = 1 if rng.random() < eff else 0
+        res = simulate(candidates, outcomes, params)
+        finals.append(res.final_bankroll)
+        drawdowns.append(res.max_drawdown)
+
+    finals_sorted = sorted(finals)
+    n = len(finals)
+    initial = params.initial_bankroll
+    losses = sum(1 for f in finals if f < initial)
+    return MonteCarloResult(
+        n_sims=n,
+        final_bankroll_p5=_percentile(finals_sorted, 5),
+        final_bankroll_p25=_percentile(finals_sorted, 25),
+        final_bankroll_median=_percentile(finals_sorted, 50),
+        final_bankroll_p75=_percentile(finals_sorted, 75),
+        final_bankroll_p95=_percentile(finals_sorted, 95),
+        final_bankroll_mean=sum(finals, ZERO) / Decimal(n),
+        median_max_drawdown=_percentile(sorted(drawdowns), 50),
+        prob_loss=Decimal(losses) / Decimal(n),
     )

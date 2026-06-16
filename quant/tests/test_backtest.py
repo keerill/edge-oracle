@@ -18,6 +18,7 @@ import pytest
 from app.math.backtest import (
     hit_rate,
     max_drawdown,
+    monte_carlo,
     realized_pnl,
     sharpe_like,
     simulate,
@@ -260,3 +261,52 @@ def test_simulate_no_look_ahead_future_outcome_cannot_change_earlier_stakes():
 
     assert stake(base, "c1") == stake(flipped, "c1")  # A unchanged (entered first)
     assert stake(base, "c2") == stake(flipped, "c2")  # B unchanged despite A flipping
+
+
+# --------------------------------------------------------------------------- monte_carlo
+
+
+def test_monte_carlo_certain_winner_has_a_degenerate_distribution():
+    # p_yes 1.0 and sigma 0 -> every resampled outcome is a win -> every sim ends at 1150.
+    params = BacktestParams(mc_sigma=Decimal("0"), mc_sims=50)
+    cand = _directional(p_yes="1.0", p_side="1.0", p_lo_side="0.90")
+    res = monte_carlo([cand], params, rng=random.Random(1))
+
+    assert res.n_sims == 50
+    for v in (
+        res.final_bankroll_p5,
+        res.final_bankroll_p25,
+        res.final_bankroll_median,
+        res.final_bankroll_p75,
+        res.final_bankroll_p95,
+        res.final_bankroll_mean,
+    ):
+        assert v == Decimal("1150")
+    assert res.prob_loss == Decimal("0")
+    assert res.median_max_drawdown == Decimal("0")
+
+
+def test_monte_carlo_is_deterministic_for_a_fixed_seed():
+    params = BacktestParams(mc_sigma=Decimal("0.05"), mc_sims=200)
+    cand = _directional(p_yes="0.50", p_side="0.50", p_lo_side="0.30")
+    a = monte_carlo([cand], params, rng=random.Random(7))
+    b = monte_carlo([cand], params, rng=random.Random(7))
+    assert a == b  # same seed -> identical distribution
+
+
+def test_monte_carlo_surfaces_variance_and_orders_percentiles():
+    # A coin-flip-ish bet ends at 1150 (win) or 950 (loss); the distribution must span both.
+    params = BacktestParams(mc_sigma=Decimal("0.05"), mc_sims=200)
+    cand = _directional(p_yes="0.50", p_side="0.50", p_lo_side="0.30")
+    res = monte_carlo([cand], params, rng=random.Random(7))
+
+    assert (
+        res.final_bankroll_p5
+        <= res.final_bankroll_p25
+        <= res.final_bankroll_median
+        <= res.final_bankroll_p75
+        <= res.final_bankroll_p95
+    )
+    assert res.final_bankroll_p5 < res.final_bankroll_p95  # genuine spread, not a point mass
+    assert Decimal("0") < res.prob_loss < Decimal("1")
+    assert Decimal("0") <= res.median_max_drawdown <= Decimal("1")

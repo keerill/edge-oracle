@@ -8,6 +8,7 @@ mode), so no float ever reaches the database.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -110,6 +111,45 @@ async def load_tracked_markets(session: AsyncSession) -> list[Market]:
             active=r["active"],
             closed=r["closed"],
             liquidity=r["liquidity"],
+        )
+        for r in rows
+    ]
+
+
+async def load_quotes(
+    session: AsyncSession,
+    *,
+    token_ids: Sequence[str] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[QuoteSnapshot]:
+    """Reload stored top-of-book snapshots **time-ordered** (then by token) — the read
+    counterpart to ``insert_quotes``, consumed by the backtest replay.
+
+    Optional ``token_ids`` restricts to specific tokens; ``start``/``end`` bound the
+    window half-open ``[start, end)``. ``Decimal`` comes straight back from NUMERIC.
+    """
+    stmt = select(quotes_table)
+    if token_ids is not None:
+        stmt = stmt.where(quotes_table.c.token_id.in_(list(token_ids)))
+    if start is not None:
+        stmt = stmt.where(quotes_table.c.time >= start)
+    if end is not None:
+        stmt = stmt.where(quotes_table.c.time < end)
+    rows = (
+        await session.execute(stmt.order_by(quotes_table.c.time, quotes_table.c.token_id))
+    ).mappings().all()
+    return [
+        QuoteSnapshot(
+            time=r["time"],
+            token_id=r["token_id"],
+            market_id=r["market_id"],
+            best_bid=r["best_bid"],
+            best_bid_size=r["best_bid_size"],
+            best_ask=r["best_ask"],
+            best_ask_size=r["best_ask_size"],
+            midpoint=r["midpoint"],
+            spread=r["spread"],
         )
         for r in rows
     ]

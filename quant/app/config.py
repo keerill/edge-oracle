@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     arb_slippage: Decimal = Decimal("0.01")  # per-set buffer beyond modeled book depth
     arb_min_net_edge: Decimal = Decimal(0)  # extra profit gate; flag only when net > this
 
+    # --- Backtest harness ----------------------------------------------------
+    # Pure mirror lives in app.models.backtest.BacktestParams; the engine maps these on.
+    # Money knobs are Decimal (env strings parse exactly: EDGE_BACKTEST_INITIAL_BANKROLL=5000).
+    backtest_initial_bankroll: Decimal = Decimal(1000)
+    kelly_frac: Decimal = Decimal("0.25")  # fractional Kelly applied to every sized bet
+    kelly_cap: Decimal = Decimal("0.05")  # hard per-position cap (fraction of bankroll)
+    corr_cap_frac: Decimal = Decimal("0.05")  # per-tag exposure cap (fraction of bankroll)
+    model_error_margin: Decimal = Decimal("0.05")  # p_lo = p_side - this (CI lower bound)
+    mc_sigma: Decimal = Decimal("0.05")  # std-dev of the Monte-Carlo model-error perturbation
+    mc_sims: int = 1000  # Monte-Carlo simulation count
+    mc_seed: int = 12345  # Monte-Carlo RNG seed (determinism)
+
     # --- HTTP / backoff / throttle -------------------------------------------
     http_timeout_s: float = 10.0
     max_retries: int = 5

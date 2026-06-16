@@ -110,6 +110,43 @@ async def test_insert_quotes_decimal_roundtrip(sessionmaker):
     assert row["best_ask_size"] == Decimal("900")
 
 
+async def test_load_quotes_is_time_ordered_and_window_filtered(sessionmaker):
+    def _q(token_id, hour, mid):
+        return QuoteSnapshot(
+            time=datetime(2026, 6, 16, hour, 0, tzinfo=timezone.utc),
+            token_id=token_id,
+            market_id="m1",
+            best_bid=Decimal("0.50"),
+            best_bid_size=Decimal("100"),
+            best_ask=Decimal("0.52"),
+            best_ask_size=Decimal("100"),
+            midpoint=Decimal(mid),
+            spread=Decimal("0.02"),
+        )
+
+    # Insert out of order; expect oldest-first back.
+    async with sessionmaker() as s:
+        await store.insert_quotes(
+            s, [_q("111", 14, "0.70"), _q("111", 12, "0.60"), _q("222", 13, "0.30")]
+        )
+        await s.commit()
+
+    async with sessionmaker() as s:
+        all_q = await store.load_quotes(s)
+        only_111 = await store.load_quotes(s, token_ids=["111"])
+        windowed = await store.load_quotes(
+            s,
+            start=datetime(2026, 6, 16, 12, 30, tzinfo=timezone.utc),
+            end=datetime(2026, 6, 16, 14, 0, tzinfo=timezone.utc),
+        )
+
+    assert [q.midpoint for q in all_q] == [Decimal("0.60"), Decimal("0.30"), Decimal("0.70")]
+    assert all(isinstance(q.midpoint, Decimal) for q in all_q)  # money stays Decimal
+    assert [q.token_id for q in only_111] == ["111", "111"]
+    # half-open [12:30, 14:00) keeps only the 13:00 row
+    assert [q.midpoint for q in windowed] == [Decimal("0.30")]
+
+
 async def test_insert_quotes_allows_null_sides(sessionmaker):
     quote = QuoteSnapshot(
         time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),

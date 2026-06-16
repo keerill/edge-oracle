@@ -406,11 +406,77 @@ signals purely to exercise the primitives.
   contrast on glass-over-canvas — primary text ≥15:1, dim ≥8:1, faint labels ≥6:1 (AA pass) in
   both themes, after darkening the light-mode faint token (was 4.32:1, below AA).
 
+## Slice: Advisor REST API + live Signals page  ✅ done (2026-06-16)
+
+Connect the two halves: expose the quant money-math as a read API and wire the dashboard to
+it. The quant layer had all the math (signals, Kelly sizing, calibration, backtest) but only
+`GET /health`; the web layer had the design system but rendered hardcoded placeholders. This
+slice adds the endpoints, a typed Zod-validated web client, a sortable **Signals** page, and a
+**signal detail** view (sizing breakdown + cost gate). **REST + signals page only** — streaming
+(SSE/Redis) stays phase 4.
+
+### What's done
+- **Pure enrichment** (`quant/app/advisor/view.py`): `advise()` joins a detected `Signal` with
+  the live quote and **reuses `position_size`/`edge_gate` unchanged** to produce a recommended
+  fractional-Kelly stake, the cost-gate breakdown, and a `[0,1]` confidence. The directional
+  mapping mirrors `backtest._directional_candidate` **exactly** (side-token midpoint/spread,
+  `p_lo = p_side − margin`) so the live advisor and the replay size identically. Frozen
+  `AdvisedSignal`/`GateBreakdown` models (`app/models/advisor.py`).
+- **Store readers** (`app/ingestion/store.py`): `load_signals` (newest-first, rebuilds the
+  concrete `Signal` by `strategy`) and `load_latest_quotes` (`DISTINCT ON (token_id)`).
+- **Routers** (`app/api/`, mounted in `main.py`): `GET /signals` (enriched, sorted by net edge,
+  `?bankroll=`/`?strategy=`/`?limit=` knobs) + `GET /signals/{id}`; `GET /calibration`
+  (`summarize`, `null` on an empty journal); `GET /backtest` (loads `EDGE_BACKTEST_RESOLUTIONS_PATH`
+  if set, else a well-formed `n_bets=0` report). `Settings` gains `backtest_resolutions_path`.
+- **Web client + boundary** (`web/src/lib/`): `zod` added; `schemas/signal.ts` + `schemas/report.ts`
+  parse the **Decimal→JSON-string** money contract (coerced to number for display); typed
+  `api/client.ts`; **BFF route handlers** (`app/api/signals`, `app/api/signals/[id]`) keep
+  `QUANT_API_URL` server-only.
+- **Signals page** (`web/src/app/signals/`): client component → `/api/signals` → a **sortable**
+  table reusing `EdgeMeter`/`Badge`/`GlassCard` (market, strategy, price m, your p, edge meter,
+  size, net-of-cost edge), rows deep-linking to **`/signals/[id]`** — a server component on
+  `GET /signals/{id}` rendering the full Kelly→cap sizing breakdown and the cost gate
+  component-by-component. `AppShell` nav now routes Signals → `/signals`.
+
+### Verified
+- `cd quant && uv run pytest -q` → **183 passed, 15 skipped** (offline; +7 `advise` worked-number
+  unit tests: cap-binds $500, gated-out, **buy_no side-quote mapping**, arb, longshot, confidence
+  bounds). With `EDGE_TEST_DATABASE_URL` → **198 passed** (+4 DB-gated ASGI integration tests:
+  shape, net-edge sort, the **Decimal→string** money assertion, `/signals/{id}` gate breakdown +
+  404, `/calibration` n, `/backtest` n_bets=0).
+- `cd web && corepack pnpm@9.15.0 test` → **28 passed** (+7: Zod boundary parse + SignalsTable
+  render/sort/empty). `build` clean (strict TS, 7 routes incl. the 2 BFF handlers).
+- **Live smoke** (Playwright, dark + light): seeded the dev DB (one market, both tokens' quotes,
+  one signal per strategy), ran `uvicorn` + `next dev`; `/signals` rendered all three rows ranked
+  by net edge (directional $50.00 / +600 bps / Gate ✓, arb +300 bps / Gate ✓, longshot below
+  gate), and `/signals/{id}` showed the gate `p_lo 0.50 > threshold 0.44 — gate passes`.
+
+### Money-math / correctness decisions (carry forward)
+- **Live == replay**: `advise` reuses `position_size` and the exact directional mapping, so the
+  recommended stake equals what the backtest would size (pinned by the cap-binds + buy_no tests).
+- **Decimal → JSON string** is the deliberate wire contract (no float in the money path); the web
+  Zod boundary coerces to number for **display only**. Pinned by a test asserting the field is a str.
+- **Side-token quote**: directional sizing uses the side you'd buy (yes-token for `buy_yes`,
+  no-token for `buy_no`) — mis-mapping silently mis-sizes; guarded by the buy_no worked example.
+- **`confidence`** is a signal-local heuristic: directional `clamp((p_lo−threshold)/(1−threshold),
+  0,1)`, arb `1` (risk-free), longshot `edge_score`. Calibration will shrink it later.
+- **Longshot has no money edge**: `edge_score` is a dimensionless [0,1] strength, so it feeds
+  `confidence` only — `edge`/`net_edge` stay 0 so it never out-ranks an actionable signal.
+- **No PK on `signals`** → ids are synthesized `strategy:market_id:epoch_ms` (round-trippable;
+  same-ms collision negligible at the 15s scan cadence). A surrogate `id` column is the long-term
+  fix (the table is *regular*, so a real PK is feasible) — see open questions.
+- **`/backtest` degrades gracefully**: empty resolutions → valid `n_bets=0` report (no
+  resolution-watcher yet); **`/calibration`** returns `null` on an empty journal (scoring zero
+  records is undefined).
+
 ## What's next
-- **Web data wiring** (next web slice): BFF routes (`/api/signals`, `/api/signals/[id]`,
-  `/api/stream` SSE over Redis via ioredis), `openapi-typescript` generation + Zod boundary
-  schemas, and a typed server fetcher; then wire `SignalList`/`SignalCard`/`MoneyMathBreakdown`/
-  `GateBadge` to live `/signals`, replacing the static placeholders. Design system + shell done (above).
+- **Streaming (phase 4)**: the remaining web data-wiring piece — `/api/stream` SSE over Redis
+  (ioredis) pushing live signal updates, and a client subscription that re-renders the Signals
+  table in place. BFF `/api/signals(+/[id])` + Zod boundary + typed client + the Signals page &
+  detail view are **done** (above). Optional: swap the hand-written Zod schemas for
+  `openapi-typescript`-generated types off the FastAPI OpenAPI spec.
+- **Calibration/backtest UI**: the `GET /calibration` and `GET /backtest` endpoints exist; add the
+  dashboard pages (reliability curve, equity curve) that consume the already-typed client stubs.
 - **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each that detects resolved markets, matches each
   to its prior estimate(s), and writes `calibration` rows; then surface `summarize` (e.g.
   `GET /calibration`) and feed `suggest_kelly_fraction`'s `adjusted_frac` into the sizing
@@ -428,13 +494,21 @@ signals purely to exercise the primitives.
   midpoint per market from `quotes`, evaluate, and persist on a loop with a CLI (mirrors
   `signals/engine.py`); add the `EDGE_*` knobs for their bands/nudge then. Feed `fair_value`
   into the future fair-value/Kelly gate.
-- **Signals plumbing**: publish signals to Redis + `GET /signals`; merge the signal scan into
-  the ingestion cycle to **reuse the books it already fetches** (drop the standalone re-fetch).
-- **Backtest, next steps**: feed real `resolutions` from the resolution-watcher (above);
-  surface results via `GET /backtest`; add re-entry/exit policies and depth-aware arb once a
-  full-book history exists; wire `favourite_longshot` once it has a probability source.
+- **Signals plumbing**: publish signals to Redis for the phase-4 SSE stream; merge the signal
+  scan into the ingestion cycle to **reuse the books it already fetches** (drop the standalone
+  re-fetch). (`GET /signals` now serves the persisted signals enriched with sizing — above.)
+- **Backtest, next steps**: feed real `resolutions` from the resolution-watcher (above); add
+  re-entry/exit policies and depth-aware arb once a full-book history exists; wire
+  `favourite_longshot` once it has a probability source. (`GET /backtest` now degrades to an
+  empty report; a `POST` with a body is the path once a resolution feed exists.)
 
 ## Open questions / observations
+- **Signal ids are synthesized** (`strategy:market_id:epoch_ms`) because `signals` has no PK. Fine
+  at the 15s scan cadence, but add a surrogate `id` column (the table is *regular*, so a real PK
+  is feasible) before signals are referenced anywhere durable (e.g. journaling a clicked bet).
+- The advisor enriches signals at **request time** off the latest quote; a stale `signals` row
+  whose market has since moved is sized against the *current* quote (honest for a live advisor,
+  but the displayed `time` is the detection time). Re-detection cadence / TTL is unaddressed.
 - `category` often absent from Gamma `/markets` (see above) — resolve before the fee logic needs it.
 - Gamma discovery is single-page (limit 500). Fine for `top_n ≤ 500`; add offset paging if the
   tracked universe ever needs to exceed that.

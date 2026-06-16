@@ -28,6 +28,14 @@ const KellyAdjustmentSchema = z.object({
   worst_bin_multiplier: money.nullable(),
 });
 
+// One point of the cumulative Brier/log-loss-over-time curve (the final point == overall).
+const CalibrationTimePointSchema = z.object({
+  time: z.string(),
+  n: z.number().int(),
+  brier: money,
+  log_loss: money,
+});
+
 // GET /calibration returns null on an empty journal.
 export const CalibrationSummarySchema = z
   .object({
@@ -35,6 +43,7 @@ export const CalibrationSummarySchema = z
     per_strategy: z.record(z.string(), CalibrationMetricsSchema),
     reliability: z.array(ReliabilityBinSchema),
     kelly: KellyAdjustmentSchema,
+    timeline: z.array(CalibrationTimePointSchema),
   })
   .nullable();
 export type CalibrationSummary = z.infer<typeof CalibrationSummarySchema>;
@@ -49,6 +58,19 @@ const StrategyBreakdownSchema = z.object({
   sharpe_like: money.nullable(),
 });
 
+// Resampled-outcome distribution (variance, not just the median). Null on a zero-bet replay.
+const MonteCarloSchema = z.object({
+  n_sims: z.number().int(),
+  final_bankroll_p5: money,
+  final_bankroll_p25: money,
+  final_bankroll_median: money,
+  final_bankroll_p75: money,
+  final_bankroll_p95: money,
+  final_bankroll_mean: money,
+  median_max_drawdown: money,
+  prob_loss: money,
+});
+
 export const BacktestResultSchema = z.object({
   initial_bankroll: money,
   final_bankroll: money,
@@ -60,5 +82,6 @@ export const BacktestResultSchema = z.object({
   per_strategy: z.record(z.string(), StrategyBreakdownSchema),
   equity_curve: z.array(z.object({ time: z.string(), equity: money })),
   closed_bets: z.array(z.unknown()),
+  monte_carlo: MonteCarloSchema.nullable(),
 });
 export type BacktestResult = z.infer<typeof BacktestResultSchema>;

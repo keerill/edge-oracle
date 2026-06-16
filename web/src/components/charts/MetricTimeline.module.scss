@@ -1,0 +1,77 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.legend {
+  display: flex;
+  gap: var(--space-4);
+  font-family: var(--font-body);
+  font-size: var(--step--1);
+  color: var(--text-dim);
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.swatchBrier,
+.swatchLog {
+  width: 14px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+}
+
+.swatchBrier {
+  background: var(--neon-violet);
+}
+
+.swatchLog {
+  background: var(--neon-cyan);
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.grid {
+  stroke: var(--glass-border);
+  stroke-width: 1;
+}
+
+.tick {
+  fill: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.brierLine,
+.logLine {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.brierLine {
+  stroke: var(--neon-violet);
+  filter: drop-shadow(0 0 calc(5px * var(--glow)) var(--neon-violet));
+}
+
+.logLine {
+  stroke: var(--neon-cyan);
+  filter: drop-shadow(0 0 calc(5px * var(--glow)) var(--neon-cyan));
+}
+
+.brierDot {
+  fill: var(--neon-violet);
+}
+
+.logDot {
+  fill: var(--neon-cyan);
+}

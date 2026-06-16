@@ -1,0 +1,60 @@
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.grid {
+  stroke: var(--glass-border);
+  stroke-width: 1;
+}
+
+.tick {
+  fill: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+// Everything below the starting bankroll is a losing outcome.
+.lossZone {
+  fill: color-mix(in srgb, var(--neon-red), transparent 92%);
+}
+
+.whisker,
+.cap {
+  stroke: var(--neon-violet);
+  stroke-width: 2;
+}
+
+.box {
+  fill: color-mix(in srgb, var(--neon-violet), transparent 70%);
+  stroke: var(--neon-violet);
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 calc(5px * var(--glow)) var(--neon-violet));
+}
+
+.median {
+  stroke: var(--neon-cyan);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 calc(5px * var(--glow)) var(--neon-cyan));
+}
+
+.mean {
+  fill: var(--neon-amber);
+  stroke: var(--bg-elev);
+  stroke-width: 1;
+}
+
+.initial {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
+  opacity: 0.8;
+}
+
+.initialLabel {
+  fill: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}

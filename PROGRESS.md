@@ -608,6 +608,88 @@ source of persisted rows). No Kafka (Redis is enough at this scale).
   staleness/TTL policy is future work (see open questions). The live engine is a **standalone CLI**
   (mirrors `signals/engine.py`), not a FastAPI lifespan task.
 
+## Slice: Observability & alerting — "know when something breaks"  ✅ done (2026-06-16)
+
+The operational-visibility layer. Until now a moving part could stop silently (a dropped CLOB
+WS, a strategy bleeding drawdown, the model drifting overconfident) — exactly the failure that
+loses money quietly. This slice adds **structured JSON logging** across both services, **Sentry**
+error capture (quant), **basic Prometheus metrics** (latency / poller health / signal counts),
+and **three application-level alerts** (dropped WS, drawdown breach, calibration drift) surfaced
+as **dashboard toasts** alongside high-net-edge opportunity notifications. Alert *decisions* are
+pure, tested predicates that **reuse the existing `max_drawdown` + calibration math** — no new
+money-math. **App-level alerting** (Redis `edge:alerts` → SSE → toast + Sentry); deliberately **no
+Prometheus/Grafana/Alertmanager containers** (keep infra minimal — `/metrics` is exposed for an
+optional future scraper).
+
+### What's done
+- **Structured logging** (`quant/app/observability/logging.py`): `JsonFormatter` (one JSON object
+  per line — `ts/level/logger/msg/service` + `extra=` fields + rendered `exc`); `configure_logging`
+  replaces the per-CLI `basicConfig` in the FastAPI lifespan + all four CLIs + the new monitor.
+  `EDGE_LOG_LEVEL`/`EDGE_LOG_JSON` knobs. Web mirror `web/src/lib/logger.ts` (same five base fields).
+- **Sentry** (`quant/app/observability/sentry.py`): `init_sentry(service)` — no-op without
+  `EDGE_SENTRY_DSN`; `LoggingIntegration(event_level=ERROR)` turns every `logger.exception` in the
+  loops into an event for free. `capture_alert` surfaces the three alerts as events. **No web Sentry**
+  (`@sentry/nextjs` deferred — web errors go to the structured logger).
+- **Prometheus** (`quant/app/observability/metrics.py`): families `edge_http_request_duration_seconds`,
+  `edge_poller_scans_total` / `edge_poller_scan_duration_seconds` / `edge_poller_last_success_timestamp_seconds`
+  / `edge_poller_quotes_written_total`, `edge_signals_total{strategy,source}`,
+  `edge_ws_connects_total`/`edge_ws_drops_total`/`edge_ws_up`, `edge_alerts_total{kind,severity}`.
+  FastAPI serves `GET /metrics`; each CLI exposes its own via `start_metrics_server(EDGE_METRICS_PORT)`
+  (best-effort; a bind clash is logged, never fatal). Increments live in the I/O/loop layer only —
+  pure math + the `run_*_once`/`run_stream` seams are untouched, so prior tests stayed green.
+- **Alerts core** (`quant/app/models/alert.py` + `quant/app/observability/alerts.py`): frozen
+  Decimal-native `Alert` (Decimal→JSON-string wire contract). Pure predicates `evaluate_ws_drop`,
+  `evaluate_drawdown` (reads `BacktestResult.max_drawdown`), `evaluate_calibration_drift` (reads
+  `KellyAdjustment.claimed_avg − realized_avg`, the overconfidence gap that shrinks Kelly). New
+  `EDGE_*` threshold/channel knobs.
+- **Alert bus + WS-drop wiring** (`quant/app/observability/alert_bus.py`): `publish_alert` counts
+  `edge_alerts_total`, captures to Sentry, publishes JSON to `edge:alerts`. `connect_clob_ws` gained
+  an injected `on_drop` seam (+ `connect`/`sleep`/`max_reconnects` for tests); `run_stream_forever`
+  publishes a `ws_drop` alert on every reconnect. Dev `--mock-drop` forces the path with no socket.
+- **Monitor loop** (`quant/app/monitoring/engine.py`): dedicated CLI (`python -m app.monitoring.engine
+  [loop|once]`) evaluating drawdown (via `run_backtest_once`) + calibration drift (via
+  `load_calibration` → `summarize`) on a cadence; `run_monitor_once` is the injectable seam (async
+  fetchers in, alerts returned).
+- **Dashboard** (web): `AlertSchema` (Zod, Decimal-string→number|null), `/api/alerts/stream` SSE
+  (mirrors the signals route, no conflation), `NotificationsProvider` + `Toast` (GlassCard tinted by
+  severity → existing neon tokens; GlassCard glow extended with amber/red; each toast its own ARIA
+  live region) mounted in `layout`. **One toast lane** for both system alerts and high-net-edge
+  opportunity toasts; the latter fire via pure `shouldToastSignal` (rising edge across
+  `HIGH_EDGE_THRESHOLD = 0.05`) on the existing signals stream.
+
+### Verified
+- `cd quant && uv run pytest -q` → **230 passed, 15 skipped** (was 208; +22 across logging/sentry/
+  metrics/alerts/alert-bus/ws-drop/monitor). `cd web && corepack pnpm@9.15.0 test` → **79 passed**
+  (+13: alert-schema, toast, notifications); `tsc --noEmit` clean; `next build` green (10 routes incl.
+  `/api/alerts/stream`).
+- **Metrics endpoint (live):** `curl localhost:8000/metrics` returned every `edge_*` family.
+- **Forced-error → alert (dev, the task's explicit ask):** with `docker compose up` (Redis) and a
+  `redis-cli SUBSCRIBE edge:alerts`:
+  - `python -m app.streaming.engine --mock-drop` → `ws_drop` alerts on `edge:alerts`
+    (`{"kind":"ws_drop","value":"1",...}`).
+  - `seed_demo` (35-row overconfident journal + resolutions) then `python -m app.monitoring.engine once`
+    (demo backtest knobs, thresholds dd 0.01 / drift 0.05) → **`drawdown_breach`** (max drawdown
+    0.0114 ≥ 0.01) **and** `calibration_drift` (claimed 0.808 vs realized 0.730, gap 0.0784 ≥ 0.05),
+    both on `edge:alerts`.
+  - `next dev` + `curl -N /api/alerts/stream` while publishing → the SSE route forwarded the alerts as
+    `data:` frames (Zod-coerced `value`/`threshold` to numbers) — the dashboard toast path end-to-end.
+
+### Money-math / correctness decisions (carry forward)
+- **No new money-math:** alert predicates reuse `max_drawdown` and the calibration `summarize`/
+  `KellyAdjustment` unchanged. Drift = high-confidence `claimed_avg − realized_avg` (overconfidence);
+  `None` when there's no high-confidence evidence. Decimal→JSON-string wire contract preserved for
+  `Alert` (web Zod coerces to number for display only).
+- **Metrics are side-effects in the I/O layer**, never inside pure math or the test seams.
+- **Data gap (acknowledged):** no live equity feed / resolution-watcher yet, so drawdown runs off the
+  **backtest replay** against `EDGE_BACKTEST_RESOLUTIONS_PATH` and drift off the **calibration journal**.
+
+### Decisions locked this slice
+- **App-level alerting**, not an Alertmanager/Grafana stack (CLAUDE.md "no infra beyond the task").
+- **Deps (quant only):** `prometheus-client` + `sentry-sdk`. Structured logging is zero-dep (custom
+  JSON formatter / `console.log`). Web Sentry deferred.
+- **Dedicated monitor loop** for the two periodic alerts (drawdown/drift); WS-drop is event-driven in
+  the streaming engine. **One dashboard toast lane** for alerts + opportunities.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional
@@ -640,6 +722,13 @@ source of persisted rows). No Kafka (Redis is enough at this scale).
   re-entry/exit policies and depth-aware arb once a full-book history exists; wire
   `favourite_longshot` once it has a probability source. (`GET /backtest` now degrades to an
   empty report; a `POST` with a body is the path once a resolution feed exists.)
+
+- **Observability, next steps**: real-time drawdown needs a **live equity feed** (today it runs off
+  the backtest replay) and calibration drift needs the **resolution-watcher** to keep the journal
+  fresh; add **alert dedup/rate-limiting** (the monitor re-fires every cycle while a condition holds);
+  optionally add `@sentry/nextjs` for browser error capture and a Prometheus/Grafana scrape stack
+  pointed at `/metrics`. (Structured logging, Sentry, `/metrics`, and the three app-level alerts +
+  dashboard toasts are **done** — above.)
 
 ## Open questions / observations
 - **Signal ids are synthesized** (`strategy:market_id:epoch_ms`) because `signals` has no PK. Fine

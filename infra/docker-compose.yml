@@ -1,6 +1,10 @@
 # Local infra for EdgeOracle.
-# Postgres + TimescaleDB (tick history) and Redis (cache + pub/sub).
-# Redis is unused by the ingestion slice but kept here to match the project infra.
+# Postgres + TimescaleDB (tick history) and Redis (cache + signal/alert pub/sub).
+#
+# Observability is app-side: the quant FastAPI app serves GET /metrics and each CLI exposes its
+# own metrics on EDGE_METRICS_PORT; alerts flow over Redis (edge:alerts) -> dashboard toast +
+# Sentry. There is intentionally NO Prometheus/Grafana/Alertmanager container here (keep infra
+# minimal) — point a scraper at /metrics later if you want one.
 #
 # Up:   docker compose -f infra/docker-compose.yml up -d
 # Down: docker compose -f infra/docker-compose.yml down   (add -v to wipe data)

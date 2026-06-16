@@ -1,8 +1,9 @@
-"""Minimal FastAPI app: health check + optional lifespan-launched poller.
+"""FastAPI app: health check, the advisor read API, and an optional lifespan poller.
 
 The poller is started here ONLY when ``EDGE_RUN_POLLER_ON_STARTUP=true``. By default
 the app is quiet and the poller is run as a standalone process
-(``python -m app.ingestion.scanner``). No signals/markets routers in this slice.
+(``python -m app.ingestion.scanner``). The advisor REST surface (``/signals``,
+``/calibration``, ``/backtest``) is always mounted.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 
+from app.api import backtest, calibration, signals
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="EdgeOracle quant", version="0.1.0", lifespan=lifespan)
+
+app.include_router(signals.router)
+app.include_router(calibration.router)
+app.include_router(backtest.router)
 
 
 @app.get("/health")

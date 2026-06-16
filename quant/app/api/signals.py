@@ -1,0 +1,137 @@
+"""GET /signals and GET /signals/{id} — detected signals enriched with live sizing.
+
+Each stored signal is joined with the latest quote for its market and run through the pure
+``app.advisor.view.advise`` (which reuses the Kelly sizing math). Money fields serialize as
+JSON strings (Decimal); the web Zod boundary parses them.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal, InvalidOperation
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.advisor.view import advise
+from app.api.deps import get_app_settings, get_session
+from app.config import Settings
+from app.ingestion import store
+from app.models.advisor import AdvisedSignal
+from app.models.market import Market
+from app.models.quote import QuoteSnapshot
+from app.models.signal import ArbSignal, Signal
+
+router = APIRouter(prefix="/signals", tags=["signals"])
+
+
+def _strategy_of(signal: Signal) -> str:
+    """The strategy tag (ArbSignal has none of its own — it is the table default)."""
+    if isinstance(signal, ArbSignal):
+        return "set_arb"
+    return signal.strategy
+
+
+def make_signal_id(signal: Signal) -> str:
+    """Synthesize a stable, round-trippable id from the natural key ``(strategy, market_id,
+    time)``. The ``signals`` table has no surrogate PK; the 15s scan cadence makes a same-ms
+    collision within one (strategy, market) effectively impossible."""
+    epoch_ms = int(signal.time.timestamp() * 1000)
+    return f"{_strategy_of(signal)}:{signal.market_id}:{epoch_ms}"
+
+
+def _parse_id(raw: str) -> tuple[str, str, int]:
+    """Split ``strategy:market_id:epoch_ms`` back into its parts (market_id may contain ':')."""
+    try:
+        strategy, rest = raw.split(":", 1)
+        market_id, epoch_raw = rest.rsplit(":", 1)
+        return strategy, market_id, int(epoch_raw)
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(status_code=422, detail=f"malformed signal id: {raw!r}") from exc
+
+
+def _enrich(
+    signal: Signal,
+    markets_by_id: dict[str, Market],
+    quotes_by_token: dict[str, QuoteSnapshot],
+    settings: Settings,
+    bankroll: Decimal,
+) -> AdvisedSignal:
+    market = markets_by_id.get(signal.market_id)
+    yes_quote = quotes_by_token.get(market.yes_token_id) if market else None
+    no_quote = quotes_by_token.get(market.no_token_id) if market else None
+    return advise(
+        signal,
+        signal_id=make_signal_id(signal),
+        market_question=market.question if market else None,
+        yes_quote=yes_quote,
+        no_quote=no_quote,
+        bankroll=bankroll,
+        frac=settings.kelly_frac,
+        cap=settings.kelly_cap,
+        slippage=settings.arb_slippage,
+        gas=settings.arb_gas,
+        model_error_margin=settings.model_error_margin,
+    )
+
+
+def _bankroll(settings: Settings, override: str | None) -> Decimal:
+    if override is None:
+        return settings.backtest_initial_bankroll
+    try:
+        value = Decimal(override)
+    except InvalidOperation as exc:
+        raise HTTPException(status_code=422, detail=f"bankroll must be numeric, got {override!r}") from exc
+    if value < 0:
+        raise HTTPException(status_code=422, detail="bankroll must be >= 0")
+    return value
+
+
+@router.get("", response_model=list[AdvisedSignal])
+async def list_signals(
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_app_settings),
+    limit: int = Query(100, ge=1, le=500),
+    strategy: str | None = Query(None),
+    bankroll: str | None = Query(None, description="override the advisor bankroll (USD)"),
+) -> list[AdvisedSignal]:
+    """Current signals, enriched with sizing, sorted by net-of-cost edge (descending)."""
+    bank = _bankroll(settings, bankroll)
+    signals = await store.load_signals(session, strategy=strategy, limit=limit)
+    markets = await store.load_tracked_markets(session)
+    markets_by_id = {m.market_id: m for m in markets}
+    token_ids = [tid for m in markets for tid in (m.yes_token_id, m.no_token_id)]
+    quotes_by_token = await store.load_latest_quotes(session, token_ids=token_ids or None)
+
+    advised = [_enrich(s, markets_by_id, quotes_by_token, settings, bank) for s in signals]
+    advised.sort(key=lambda a: a.net_edge, reverse=True)
+    return advised
+
+
+@router.get("/{signal_id}", response_model=AdvisedSignal)
+async def get_signal(
+    signal_id: str,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_app_settings),
+    bankroll: str | None = Query(None),
+) -> AdvisedSignal:
+    """One signal's full sizing breakdown + cost-gate components."""
+    bank = _bankroll(settings, bankroll)
+    strategy, market_id, epoch_ms = _parse_id(signal_id)
+    candidates = await store.load_signals(session, strategy=strategy, limit=500)
+    match = next(
+        (
+            s
+            for s in candidates
+            if s.market_id == market_id and int(s.time.timestamp() * 1000) == epoch_ms
+        ),
+        None,
+    )
+    if match is None:
+        raise HTTPException(status_code=404, detail=f"signal not found: {signal_id}")
+
+    markets = await store.load_tracked_markets(session)
+    markets_by_id = {m.market_id: m for m in markets}
+    market = markets_by_id.get(market_id)
+    token_ids = [market.yes_token_id, market.no_token_id] if market else None
+    quotes_by_token = await store.load_latest_quotes(session, token_ids=token_ids)
+    return _enrich(match, markets_by_id, quotes_by_token, settings, bank)

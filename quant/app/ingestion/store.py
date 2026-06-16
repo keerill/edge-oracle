@@ -21,7 +21,12 @@ from app.db.tables import signals as signals_table
 from app.models.calibration import CalibrationRecord
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
-from app.models.signal import Signal
+from app.models.signal import (
+    ArbSignal,
+    ExtremeCorrectionSignal,
+    FavouriteLongshotSignal,
+    Signal,
+)
 
 # Market columns updated on conflict (everything except the PK and created_at).
 _MARKET_UPDATE_COLS = (
@@ -153,6 +158,88 @@ async def load_quotes(
         )
         for r in rows
     ]
+
+
+async def load_latest_quotes(
+    session: AsyncSession, *, token_ids: Sequence[str] | None = None
+) -> dict[str, QuoteSnapshot]:
+    """Return the **newest** snapshot per token (``token_id -> QuoteSnapshot``) — what the
+    advisor needs to price each live signal. ``DISTINCT ON (token_id)`` keeps one row per token
+    (the freshest), served straight off ``ix_quotes_token_time`` ``(token_id, time DESC)``.
+    """
+    stmt = select(quotes_table)
+    if token_ids is not None:
+        stmt = stmt.where(quotes_table.c.token_id.in_(list(token_ids)))
+    stmt = stmt.distinct(quotes_table.c.token_id).order_by(
+        quotes_table.c.token_id, quotes_table.c.time.desc()
+    )
+    rows = (await session.execute(stmt)).mappings().all()
+    return {
+        r["token_id"]: QuoteSnapshot(
+            time=r["time"],
+            token_id=r["token_id"],
+            market_id=r["market_id"],
+            best_bid=r["best_bid"],
+            best_bid_size=r["best_bid_size"],
+            best_ask=r["best_ask"],
+            best_ask_size=r["best_ask_size"],
+            midpoint=r["midpoint"],
+            spread=r["spread"],
+        )
+        for r in rows
+    }
+
+
+def _signal_from_row(r) -> Signal:
+    """Rebuild the concrete ``Signal`` subclass from a ``signals`` row by its ``strategy`` tag
+    (each strategy populated only its own nullable columns)."""
+    strategy = r["strategy"]
+    if strategy == "set_arb":
+        return ArbSignal(
+            time=r["time"],
+            market_id=r["market_id"],
+            condition_id=r["condition_id"],
+            kind=r["kind"],
+            yes_price=r["yes_price"],
+            no_price=r["no_price"],
+            set_size=r["set_size"],
+            gross_edge=r["gross_edge"],
+            estimated_costs=r["estimated_costs"],
+            net_edge=r["net_edge"],
+            hypothetical_pnl=r["hypothetical_pnl"],
+        )
+    if strategy == "favourite_longshot":
+        return FavouriteLongshotSignal(
+            time=r["time"],
+            market_id=r["market_id"],
+            condition_id=r["condition_id"],
+            kind=r["kind"],
+            price=r["price"],
+            edge_score=r["edge_score"],
+        )
+    if strategy == "extreme_correction":
+        return ExtremeCorrectionSignal(
+            time=r["time"],
+            market_id=r["market_id"],
+            condition_id=r["condition_id"],
+            price=r["price"],
+            fair_value=r["fair_value"],
+        )
+    raise ValueError(f"unknown signal strategy: {strategy!r}")
+
+
+async def load_signals(
+    session: AsyncSession, *, strategy: str | None = None, limit: int = 100
+) -> list[Signal]:
+    """Reload recent detected signals, **newest first** — the read counterpart to
+    ``insert_signals`` consumed by the advisor REST layer. Optional ``strategy`` filter; capped
+    by ``limit``. ``Decimal`` comes straight back from NUMERIC (no float)."""
+    stmt = select(signals_table)
+    if strategy is not None:
+        stmt = stmt.where(signals_table.c.strategy == strategy)
+    stmt = stmt.order_by(signals_table.c.time.desc()).limit(limit)
+    rows = (await session.execute(stmt)).mappings().all()
+    return [_signal_from_row(r) for r in rows]
 
 
 async def insert_signals(session: AsyncSession, signals: Sequence[Signal]) -> int:

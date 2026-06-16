@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     mc_sigma: Decimal = Decimal("0.05")  # std-dev of the Monte-Carlo model-error perturbation
     mc_sims: int = 1000  # Monte-Carlo simulation count
     mc_seed: int = 12345  # Monte-Carlo RNG seed (determinism)
+    # Optional path to a JSON market-outcome feed for GET /backtest (resolution ingestion is a
+    # later slice). Unset -> the endpoint returns a well-formed zero-bet report.
+    backtest_resolutions_path: str | None = None
 
     # --- HTTP / backoff / throttle -------------------------------------------
     http_timeout_s: float = 10.0

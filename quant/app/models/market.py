@@ -20,7 +20,10 @@ class Market(BaseModel):
     slug: str
     category: str | None
     event_id: str | None
-    outcomes: tuple[str, ...]  # e.g. ("Yes", "No"); used to filter the universe
+    # Populated from Gamma discovery and used to filter the universe (is_binary).
+    # Empty for markets reloaded from the DB (outcomes are not persisted, and a
+    # reloaded market is snapshotted, not re-ranked).
+    outcomes: tuple[str, ...] = ()
     yes_token_id: str  # clobTokenIds[0] — uint256 string
     no_token_id: str  # clobTokenIds[1] — uint256 string
     enable_order_book: bool

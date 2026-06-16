@@ -1,0 +1,81 @@
+"""Async writes — the only DB-write module. Sessions are caller-owned.
+
+``Decimal`` passes straight through to the NUMERIC columns (asyncpg maps it
+natively); ``QuoteSnapshot.model_dump()`` preserves ``Decimal``/``datetime`` (python
+mode), so no float ever reaches the database.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from sqlalchemy import func, insert, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.tables import markets as markets_table
+from app.db.tables import quotes as quotes_table
+from app.models.market import Market
+from app.models.quote import QuoteSnapshot
+
+# Market columns updated on conflict (everything except the PK and created_at).
+_MARKET_UPDATE_COLS = (
+    "condition_id",
+    "question",
+    "slug",
+    "category",
+    "event_id",
+    "yes_token_id",
+    "no_token_id",
+    "enable_order_book",
+    "active",
+    "closed",
+    "liquidity",
+)
+
+
+def _market_row(m: Market) -> dict:
+    return {
+        "market_id": m.market_id,
+        "condition_id": m.condition_id,
+        "question": m.question,
+        "slug": m.slug,
+        "category": m.category,
+        "event_id": m.event_id,
+        "yes_token_id": m.yes_token_id,
+        "no_token_id": m.no_token_id,
+        "enable_order_book": m.enable_order_book,
+        "active": m.active,
+        "closed": m.closed,
+        "tracked": True,
+        "liquidity": m.liquidity,
+    }
+
+
+async def upsert_markets(session: AsyncSession, markets: Sequence[Market]) -> None:
+    """Insert/update the tracked universe (``tracked=True`` for all given)."""
+    if not markets:
+        return
+    stmt = pg_insert(markets_table).values([_market_row(m) for m in markets])
+    set_ = {col: getattr(stmt.excluded, col) for col in _MARKET_UPDATE_COLS}
+    set_["tracked"] = True
+    set_["updated_at"] = func.now()
+    stmt = stmt.on_conflict_do_update(index_elements=["market_id"], set_=set_)
+    await session.execute(stmt)
+
+
+async def set_untracked(session: AsyncSession, keep_ids: set[str]) -> None:
+    """Flip ``tracked=False`` for currently-tracked markets not in ``keep_ids``."""
+    stmt = update(markets_table).where(markets_table.c.tracked.is_(True))
+    if keep_ids:
+        stmt = stmt.where(markets_table.c.market_id.notin_(keep_ids))
+    await session.execute(stmt.values(tracked=False, updated_at=func.now()))
+
+
+async def insert_quotes(session: AsyncSession, quotes: Sequence[QuoteSnapshot]) -> int:
+    """Append a tick's worth of quote snapshots in a single batch insert."""
+    if not quotes:
+        return 0
+    rows = [q.model_dump() for q in quotes]
+    await session.execute(insert(quotes_table), rows)
+    return len(rows)

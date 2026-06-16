@@ -119,12 +119,68 @@ YES+NO > $1). **Advisor only — detects + records, never executes.**
 - `signals` is a **regular table** (sparse, append-only), not a hypertable; one row per
   flagged market per scan (no dedup yet).
 
+## Slice: Price-based signals (favourite-longshot + extreme correction)  ✅ done (2026-06-16)
+
+Two price-only heuristic signals as **pure, tested functions**, both recorded to the same
+`signals` table under a new `strategy` tag. Favourite-longshot exploits the documented bias
+(back the underpriced favourite, fade the overpriced longshot); extreme-correction nudges an
+extreme implied probability back toward 0.50 and exposes the corrected estimate as a future
+fair-value input. **Advisor only — math + persistence; no sizing, no live scanner this slice.**
+
+### What's done
+- **Pure math**: `app/math/longshot.py` (`evaluate_favourite_longshot` + `LongshotParams`) and
+  `app/math/correction.py` (`evaluate_extreme_correction` + `CorrectionParams`). `Decimal` in,
+  signal/`None` out; no I/O, no clock (capture time injected). Thresholds are frozen-`Params`
+  defaults (not yet `EDGE_*` knobs — those land with the scanner, as the arb knobs did).
+- **Signal models** (`app/models/signal.py`): frozen `FavouriteLongshotSignal` (`kind`
+  buy_yes/buy_no, `price`, `edge_score`) and `ExtremeCorrectionSignal` (`price`, `fair_value`),
+  plus a `Signal` union. Each maps to a subset of the `signals` columns.
+- **Schema**: generalized `signals` (`app/db/tables.py`) + Alembic `0003_price_signals` — added
+  `strategy` (NOT NULL, server_default `'set_arb'`), relaxed the 7 set-arb NUMERIC columns to
+  nullable, added nullable `price`/`edge_score`/`fair_value`, added `ix_signals_strategy_time`.
+- **Store** (`app/ingestion/store.py`): `insert_signals` broadened to the `Signal` union (one
+  homogeneous strategy per call); set-arb path untouched (its insert omits `strategy` → default).
+- **Tests**: **+33** (17 favourite-longshot + 14 correction worked examples covering every
+  boundary; +2 DB-gated store roundtrips for the new strategies).
+
+### Verified
+- `cd quant && uv run pytest -q` → **98 passed, 8 skipped** (store skipped without a DB).
+- With `EDGE_TEST_DATABASE_URL=…edge_test` → **106 passed** (incl. both new strategy roundtrips:
+  strategy tag persists, unused set-arb columns are NULL, NUMERIC↔Decimal exact).
+- `uv run alembic upgrade head` → `0002_signals → 0003_price_signals`; `\d signals` confirms the
+  new columns, the now-nullable arb columns, and `ix_signals_strategy_time`. Downgrade→upgrade
+  round-trip clean (arb columns restored to NOT NULL).
+
+### Money-math / correctness decisions (carry forward)
+- **Bands** (favourite-longshot, closed intervals): back YES on `0.75 ≤ m ≤ 0.92`, buy NO on
+  `0.05 ≤ m ≤ 0.15`; the gaps and the true extremes (`<0.03` / `>0.97`) emit nothing (spread eats
+  the edge). Boundaries: `m=0.04 → none`, `0.10 → buy_no score 0.5`, `0.80 → buy_yes score
+  ≈0.2941`, `0.96 → none`.
+- **Edge score** ∈ [0,1], monotonic toward the more-mispriced end: favourite `(m−0.75)/0.17`,
+  longshot `(0.15−m)/0.10`. A heuristic strength, **not** a probability/EV.
+- **Correction** (open band `m<0.15` or `m>0.85`): the nudge is **absolute** percentage points,
+  scaled by distance from 0.50 — `0.03` at the band edge → `0.08` at the extreme (clamped);
+  `corrected = m ± nudge` toward 0.50, never overshoots. Worked: `0.04 → 0.1067`, `0.10 → 0.1467`,
+  `0.96 → 0.8933`, `0.0 → 0.08`, `1.0 → 0.92`. Both functions raise on `m ∉ [0,1]`.
+- One `signals` table, `strategy`-tagged; set-arb and price-signal columns are mutually exclusive
+  per row (all nullable). No JSON blob — money stays Decimal↔NUMERIC.
+
+### Decisions locked this slice
+- **Math + persistence only** — no Kelly sizing, no `EDGE_*` knobs, and no live scanner/poller yet
+  (wiring `m` from the latest `quotes` midpoint on a loop is the next slice, mirroring how
+  `signals/engine.py` followed `math/arb.py`). The write path is proven by the DB-gated roundtrips.
+
 ## What's next
 - **Trades ingestion**: Data API `/trades` client + `trades` hypertable + poll trade prints.
 - **Category resolution**: Gamma `/markets` frequently omits `category` (observed NULL in the
   smoke run). Derive it from `events[].tags[]` so the fee table (crypto/politics/…) can key on it.
 - **More signals math**: Kelly sizing (fractional + hard cap), fee-by-category table, model
-  fair-value + CI-lower-bound gate. (Set-arb `math/arb.py` + `signals/engine.py` are done.)
+  fair-value + CI-lower-bound gate. (Set-arb `math/arb.py` + `signals/engine.py` done; price
+  signals `math/longshot.py` + `math/correction.py` done.)
+- **Price-signal scanner**: wire the two new pure functions to a live scan — read the latest
+  midpoint per market from `quotes`, evaluate, and persist on a loop with a CLI (mirrors
+  `signals/engine.py`); add the `EDGE_*` knobs for their bands/nudge then. Feed `fair_value`
+  into the future fair-value/Kelly gate.
 - **Signals plumbing**: publish signals to Redis + `GET /signals`; merge the signal scan into
   the ingestion cycle to **reuse the books it already fetches** (drop the standalone re-fetch).
 - **Backtest**: deterministic replay over the stored `quotes` ticks.

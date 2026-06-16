@@ -9,6 +9,10 @@ The DSN is a SECRET: supply it via env / a secret manager, never commit it.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.alert import Alert
 
 
 def init_sentry(service: str) -> None:
@@ -30,3 +34,22 @@ def init_sentry(service: str) -> None:
         integrations=[LoggingIntegration(level=None, event_level=logging.ERROR)],
     )
     sentry_sdk.set_tag("service", service)
+
+
+def capture_alert(alert: Alert) -> None:
+    """Send an alert to Sentry as a message event. No-op when Sentry isn't initialized.
+
+    Alert severities ("info"/"warning"/"error") are also valid Sentry levels, so the severity
+    maps straight through.
+    """
+    import sentry_sdk
+
+    if not sentry_sdk.get_client().is_active():
+        return
+    with sentry_sdk.new_scope() as scope:
+        scope.set_tag("alert_kind", alert.kind)
+        if alert.value is not None:
+            scope.set_extra("value", str(alert.value))
+        if alert.threshold is not None:
+            scope.set_extra("threshold", str(alert.threshold))
+        sentry_sdk.capture_message(f"{alert.title}: {alert.detail}", level=alert.severity)

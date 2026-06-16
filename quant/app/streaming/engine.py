@@ -21,12 +21,15 @@ import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 from app.config import Settings, get_settings
 from app.db.engine import get_sessionmaker
 from app.ingestion import store as store_mod
 from app.math.arb import ArbParams, evaluate_market
 from app.models.advisor import AdvisedSignal
+from app.observability.alert_bus import publish_alert
+from app.observability.alerts import evaluate_ws_drop
 from app.observability.logging import configure_logging
 from app.observability.metrics import (
     SIGNALS,
@@ -150,18 +153,30 @@ async def connect_clob_ws(
     token_ids: list[str],
     *,
     reconnect_delay_s: float = 2.0,
+    on_drop: Callable[[Exception], Awaitable[None]] | None = None,
+    connect: Callable[[str], Any] | None = None,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    max_reconnects: int | None = None,
 ) -> AsyncIterator[dict]:
     """Connect to the CLOB market channel, subscribe to ``token_ids``, yield raw frames.
 
-    Reconnects with a fixed delay on any drop. The market channel sends an array of ``book``
-    snapshots on subscribe and single delta frames thereafter — both are flattened to dicts.
+    Reconnects with a fixed delay on any drop; ``on_drop(exc)`` is awaited on each drop (the
+    live path publishes a ws_drop alert there). ``connect``/``sleep``/``max_reconnects`` are
+    injectable seams for tests (default ``connect`` is ``websockets.connect``). The market
+    channel sends an array of ``book`` snapshots on subscribe and single delta frames after —
+    both are flattened to dicts.
     """
-    import websockets  # local import: only needed for the live path
+    connector = connect
+    if connector is None:
+        import websockets  # local import: only needed for the live path
+
+        connector = websockets.connect
 
     subscribe = json.dumps({"assets_ids": token_ids, "type": "market"})
+    reconnects = 0
     while True:
         try:
-            async with websockets.connect(url) as ws:
+            async with connector(url) as ws:
                 await ws.send(subscribe)
                 logger.info("CLOB WS connected: %d tokens subscribed", len(token_ids))
                 WS_CONNECTS.inc()
@@ -182,7 +197,15 @@ async def connect_clob_ws(
             WS_DROPS.inc()
             WS_UP.set(0)
             logger.warning("CLOB WS dropped (%r); reconnecting in %ss", exc, reconnect_delay_s)
-            await asyncio.sleep(reconnect_delay_s)
+            if on_drop is not None:
+                try:
+                    await on_drop(exc)
+                except Exception:  # noqa: BLE001 - alerting must never kill the stream
+                    logger.exception("on_drop handler failed")
+            if max_reconnects is not None and reconnects >= max_reconnects:
+                return
+            reconnects += 1
+            await sleep(reconnect_delay_s)
 
 
 async def run_stream_forever() -> None:
@@ -200,7 +223,15 @@ async def run_stream_forever() -> None:
 
     redis = aioredis.from_url(settings.redis_url)
     params = arb_params(settings)
-    messages = connect_clob_ws(settings.clob_ws_url, book_store.token_ids)
+
+    async def on_drop(_exc: Exception) -> None:
+        alert = evaluate_ws_drop(
+            drops=1, window_drops_threshold=settings.ws_drop_alert_threshold, now=_utcnow()
+        )
+        if alert is not None:
+            await publish_alert(redis, settings.alerts_channel, alert)
+
+    messages = connect_clob_ws(settings.clob_ws_url, book_store.token_ids, on_drop=on_drop)
 
     async def publish(advised: AdvisedSignal) -> None:
         await publish_signal(redis, settings.signals_channel, advised)
@@ -271,15 +302,50 @@ async def run_mock_forever(
         await redis.aclose()
 
 
+async def run_mock_drop_forever(
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    interval_s: float = 3.0,
+    now: Callable[[], datetime] = _utcnow,
+) -> None:
+    """Publish a synthetic ws_drop alert on a timer (dev only) — no real socket needed.
+
+    Exercises the full alert path end-to-end (``evaluate_ws_drop`` -> ``publish_alert`` ->
+    Redis + Sentry), so a dev can watch a forced "something broke" event reach the dashboard.
+    """
+    import redis.asyncio as aioredis
+
+    settings = get_settings()
+    redis = aioredis.from_url(settings.redis_url)
+    logger.info("mock ws-drop publisher -> %s on %s", settings.alerts_channel, settings.redis_url)
+    try:
+        while True:
+            WS_DROPS.inc()
+            WS_UP.set(0)
+            alert = evaluate_ws_drop(
+                drops=1, window_drops_threshold=settings.ws_drop_alert_threshold, now=now()
+            )
+            if alert is not None:
+                await publish_alert(redis, settings.alerts_channel, alert)
+                logger.warning("published mock ws_drop alert")
+            await sleep(interval_s)
+    finally:
+        await redis.aclose()
+
+
 def main() -> None:
-    """CLI: ``python -m app.streaming.engine`` (live) or ``... --mock`` (synthetic dev feed)."""
+    """CLI: ``python -m app.streaming.engine`` (live), ``--mock`` (synthetic signal feed), or
+    ``--mock-drop`` (synthetic WS-drop alerts)."""
     configure_logging("quant.streaming")
     init_sentry("quant.streaming")
     settings = get_settings()
     if settings.metrics_enabled:
         start_metrics_server(settings.metrics_port)
-    if len(sys.argv) > 1 and sys.argv[1] == "--mock":
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "--mock":
         asyncio.run(run_mock_forever())
+    elif mode == "--mock-drop":
+        asyncio.run(run_mock_drop_forever())
     else:
         asyncio.run(run_stream_forever())
 

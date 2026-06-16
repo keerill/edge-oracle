@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from app.api import backtest, calibration, signals
 from app.config import get_settings
 from app.observability.logging import configure_logging
+from app.observability.sentry import init_sentry
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging("quant")
+    init_sentry("quant")
     task: asyncio.Task[None] | None = None
     if settings.run_poller_on_startup:
         # Imported lazily so the app (and tests) don't require DB/clients unless

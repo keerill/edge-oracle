@@ -35,6 +35,7 @@ from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 from app.models.signal import ArbSignal, ExtremeCorrectionSignal
 from app.observability.logging import configure_logging
+from app.observability.sentry import init_sentry
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,7 @@ def main() -> None:
     (resolution ingestion is a future slice). Run with no argument to confirm wiring (it
     logs an empty result and the missing-feed warning)."""
     configure_logging("quant.backtest")
+    init_sentry("quant.backtest")
     if len(sys.argv) > 1:
         resolutions = _load_resolutions(sys.argv[1])
     else:

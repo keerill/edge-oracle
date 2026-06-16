@@ -30,6 +30,7 @@ from app.models.book import OrderBook
 from app.models.market import Market
 from app.models.signal import ArbSignal
 from app.observability.logging import configure_logging
+from app.observability.sentry import init_sentry
 from app.polymarket.clob_client import ClobClient
 from app.polymarket.http import make_http_client
 
@@ -185,6 +186,7 @@ async def _run_once() -> None:
 def main() -> None:
     """CLI: ``python -m app.signals.engine`` (one cycle) or ``... loop`` (forever)."""
     configure_logging("quant.signals")
+    init_sentry("quant.signals")
     mode = sys.argv[1] if len(sys.argv) > 1 else "once"
     if mode == "loop":
         asyncio.run(run_signal_poller_forever())

@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = True
 
+    # --- Observability: Sentry (errors) --------------------------------------
+    # No-op unless EDGE_SENTRY_DSN is set. The DSN is a SECRET — supply it via env / a
+    # secret manager, NEVER commit it. With LoggingIntegration, every logger.error /
+    # logger.exception in the loops becomes a Sentry event automatically.
+    sentry_dsn: str | None = None
+    sentry_environment: str = "dev"
+
     @property
     def allowlist_ids(self) -> tuple[str, ...]:
         """Parse the comma-separated allowlist into a tuple of condition ids."""

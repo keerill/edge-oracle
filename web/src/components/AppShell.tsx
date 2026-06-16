@@ -1,13 +1,15 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import Badge from "./Badge";
 import ThemeToggle from "./ThemeToggle";
 import styles from "./AppShell.module.scss";
 
-const NAV = [
-  { label: "Signals", active: true },
-  { label: "Markets", active: false },
-  { label: "Backtest", active: false },
-  { label: "Calibration", active: false },
+// `href: null` = not yet routed (Markets/Backtest/Calibration land in later slices).
+const NAV: { label: string; href: string | null }[] = [
+  { label: "Signals", href: "/signals" },
+  { label: "Markets", href: null },
+  { label: "Backtest", href: null },
+  { label: "Calibration", href: null },
 ];
 
 /** Top bar + centered content frame. The persistent chrome around every page. */
@@ -25,16 +27,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </a>
 
           <nav className={styles.nav} aria-label="Primary">
-            {NAV.map((item) => (
-              <a
-                key={item.label}
-                href="#"
-                className={`${styles.navLink} ${item.active ? styles.navActive : ""}`}
-                aria-current={item.active ? "page" : undefined}
-              >
-                {item.label}
-              </a>
-            ))}
+            {NAV.map((item) =>
+              item.href ? (
+                <Link key={item.label} href={item.href} className={styles.navLink}>
+                  {item.label}
+                </Link>
+              ) : (
+                <span
+                  key={item.label}
+                  className={`${styles.navLink} ${styles.navDisabled}`}
+                  aria-disabled="true"
+                >
+                  {item.label}
+                </span>
+              ),
+            )}
           </nav>
 
           <div className={styles.actions}>

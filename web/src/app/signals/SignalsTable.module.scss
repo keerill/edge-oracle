@@ -1,0 +1,140 @@
+.wrap {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  overflow-x: auto;
+}
+
+.empty {
+  padding: var(--space-6);
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step-0);
+
+  th,
+  td {
+    padding: var(--space-3) var(--space-4);
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  thead th {
+    font-family: var(--font-body);
+    font-size: var(--step--1);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    border-bottom: 1px solid var(--glass-border);
+    white-space: nowrap;
+  }
+}
+
+.numCol,
+.num {
+  text-align: right;
+}
+
+.gateCol {
+  text-align: center;
+}
+
+.sortBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  transition: color var(--dur-fast) var(--ease-out);
+
+  &:hover {
+    color: var(--text);
+  }
+}
+
+.sortActive {
+  color: var(--neon-cyan);
+  @include text-glow(var(--neon-cyan), 10px, 0.6);
+}
+
+.caret {
+  font-size: 0.7em;
+  opacity: 0.8;
+}
+
+.row {
+  border-bottom: 1px solid color-mix(in srgb, var(--glass-border) 55%, transparent);
+  transition: background var(--dur-fast) var(--ease-out);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  &:hover {
+    background: var(--glass-bg);
+  }
+}
+
+.marketCell {
+  max-width: 30ch;
+}
+
+.marketLink {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  &:hover .question {
+    color: var(--neon-violet);
+    @include text-glow(var(--neon-violet), 12px, 0.7);
+  }
+}
+
+.question {
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.strategy {
+  font-size: var(--step--1);
+  color: var(--text-faint);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.num {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.sizePct {
+  display: block;
+  font-size: var(--step--1);
+  color: var(--text-faint);
+}
+
+.meterCell {
+  min-width: 180px;
+}
+
+.gateCell {
+  text-align: center;
+}

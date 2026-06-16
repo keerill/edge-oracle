@@ -1,0 +1,42 @@
+// Shared SCSS mixins/functions — NO top-level CSS output.
+// Auto-injected into every SCSS Module via next.config sassOptions.additionalData,
+// so primitives can `@include glass` / `@include neon-glow(...)` without an explicit @use.
+// All values resolve to CSS custom properties defined in tokens.scss, so theming stays runtime.
+
+// Scale a colour's intensity by the runtime --glow token (1 in dark, dimmed in light).
+// At --glow:1 the colour is full strength; lower --glow mixes it toward transparent.
+@function glow-color($color, $strength: 1) {
+  @return color-mix(in srgb, #{$color}, transparent calc((1 - var(--glow) * #{$strength}) * 100%));
+}
+
+// Frosted translucent surface. The workhorse of the neon-glass look.
+@mixin glass($radius: var(--radius-lg)) {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: $radius;
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  box-shadow:
+    var(--shadow-drop),
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 0 0 1px var(--glass-inset);
+}
+
+// Outer neon halo around a box. Blur + alpha both track --glow.
+@mixin neon-glow($color, $blur: 22px, $strength: 0.55) {
+  box-shadow:
+    0 0 calc(#{$blur} * 0.5) glow-color($color, $strength),
+    0 0 #{$blur} glow-color($color, calc(#{$strength} * 0.7)),
+    0 0 calc(#{$blur} * 2) glow-color($color, calc(#{$strength} * 0.4));
+}
+
+// Neon text shadow for accent headings/figures.
+@mixin text-glow($color, $blur: 14px, $strength: 0.8) {
+  text-shadow: 0 0 calc(#{$blur} * var(--glow)) glow-color($color, $strength);
+}
+
+// Accessible keyboard focus ring (always visible regardless of --glow).
+@mixin focus-ring($color: var(--neon-cyan)) {
+  outline: 2px solid #{$color};
+  outline-offset: 2px;
+}

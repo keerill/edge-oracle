@@ -1,0 +1,65 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.25rem 0.7rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 calc(8px * var(--glow)) currentColor;
+}
+
+.pulse {
+  animation: badge-pulse 1.8s var(--ease-out) infinite;
+}
+
+@keyframes badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+// ---- Variants: tint border + text in the accent, keep fill subtle ----
+@mixin tint($color) {
+  color: $color;
+  border-color: glow-color($color, 0.55);
+  background: color-mix(in srgb, #{$color}, transparent 88%);
+  @include neon-glow($color, 14px, 0.28);
+}
+
+.accent {
+  @include tint(var(--neon-violet));
+}
+.pass {
+  @include tint(var(--neon-green));
+}
+.watch {
+  @include tint(var(--neon-amber));
+}
+.gated {
+  @include tint(var(--neon-red));
+}
+
+.neutral {
+  color: var(--text-dim);
+}

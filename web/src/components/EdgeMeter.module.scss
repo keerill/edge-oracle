@@ -1,0 +1,88 @@
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  // Per-status accent drives fill + value colour.
+  --meter-accent: var(--neon-green);
+
+  &.watch {
+    --meter-accent: var(--neon-amber);
+  }
+  &.gated {
+    --meter-accent: var(--neon-red);
+  }
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.label {
+  font-size: var(--step--1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.value {
+  font-size: var(--step-1);
+  font-weight: 600;
+  color: var(--meter-accent);
+  @include text-glow(var(--meter-accent), 16px, 0.9);
+}
+
+.unit {
+  margin-left: 0.25rem;
+  font-size: var(--step--1);
+  color: var(--text-faint);
+  text-shadow: none;
+}
+
+.track {
+  position: relative;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  overflow: visible;
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--meter-accent), transparent 40%),
+    var(--meter-accent)
+  );
+  @include neon-glow(var(--meter-accent), 18px, 0.55);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+
+.threshold {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  transform: translateX(-1px);
+  background: var(--text);
+  opacity: 0.7;
+  border-radius: 2px;
+}
+
+.thresholdLabel {
+  position: absolute;
+  top: -1.15rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}

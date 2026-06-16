@@ -1,0 +1,116 @@
+// Design tokens — the single source of truth for the neon-glass language.
+// Emitted as CSS custom properties so they switch at runtime via [data-theme].
+// Dark is the canonical look; light is a clean, dimmed-glow variant of the same hues.
+
+:root,
+[data-theme="dark"] {
+  // ---- Canvas (deep purple-black) ----
+  --bg: #07050e;
+  --bg-elev: #0e0a1c;
+  --bg-aurora-1: #2a0e52; // violet bloom
+  --bg-aurora-2: #08303f; // cyan bloom
+  --bg-aurora-3: #401046; // magenta bloom
+
+  // ---- Glass surfaces ----
+  --glass-bg: rgba(150, 120, 230, 0.06);
+  --glass-bg-strong: rgba(150, 120, 230, 0.1);
+  --glass-border: rgba(178, 150, 255, 0.16);
+  --glass-highlight: rgba(255, 255, 255, 0.08); // top inner sheen
+  --glass-inset: rgba(120, 90, 200, 0.05);
+  --glass-blur: 18px;
+
+  // ---- Neon accents ----
+  --neon-violet: #b27bff;
+  --neon-magenta: #ff5ce1;
+  --neon-cyan: #38ecff;
+  --neon-green: #36ffb0; // positive edge / PASS
+  --neon-amber: #ffc24d; // WATCH
+  --neon-red: #ff5c78; // GATED / negative
+  --accent: var(--neon-violet);
+
+  // ---- Text (verified ≥4.5:1 on glass-over-canvas) ----
+  --text: #efeaff;
+  --text-dim: #b9b0d8;
+  --text-faint: #978dbe; // ≥4.5:1 on glass even over the lighter "strong" surface
+  --on-accent: #0a0613; // text sitting on a solid neon fill
+
+  // ---- Glow intensity: full in dark ----
+  --glow: 1;
+  --shadow-drop: 0 18px 50px -20px rgba(0, 0, 0, 0.85);
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  // ---- Canvas (pale lavender) ----
+  --bg: #f1edfb;
+  --bg-elev: #ffffff;
+  --bg-aurora-1: #d9c8ff;
+  --bg-aurora-2: #c5eef8;
+  --bg-aurora-3: #f3cdf0;
+
+  // ---- Glass surfaces (lighter, more opaque so text stays readable) ----
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-bg-strong: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(90, 60, 160, 0.18);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-inset: rgba(120, 90, 200, 0.04);
+  --glass-blur: 16px;
+
+  // ---- Neon accents: darker/denser hues so they meet contrast on light glass ----
+  --neon-violet: #7b27d6;
+  --neon-magenta: #c8159e;
+  --neon-cyan: #0a8fa6;
+  --neon-green: #0a8f5e;
+  --neon-amber: #9a6500;
+  --neon-red: #c01d3d;
+  --accent: var(--neon-violet);
+
+  // ---- Text ----
+  --text: #1b1235;
+  --text-dim: #4c4072;
+  --text-faint: #5d5286; // darkened to clear 4.5:1 for small uppercase labels on light glass
+  --on-accent: #ffffff;
+
+  // ---- Glow intensity: dimmed so light mode reads as crisp glass, not neon ----
+  --glow: 0.25;
+  --shadow-drop: 0 16px 40px -22px rgba(60, 30, 120, 0.4);
+
+  color-scheme: light;
+}
+
+:root {
+  // ---- Type scale & families (font vars injected by next/font in layout) ----
+  --font-display: var(--font-syne), "Trebuchet MS", system-ui, sans-serif;
+  --font-body: var(--font-sora), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains), "SFMono-Regular", ui-monospace, monospace;
+
+  --step--1: clamp(0.78rem, 0.74rem + 0.2vw, 0.86rem);
+  --step-0: clamp(0.92rem, 0.88rem + 0.2vw, 1rem);
+  --step-1: clamp(1.1rem, 1rem + 0.5vw, 1.3rem);
+  --step-2: clamp(1.45rem, 1.25rem + 1vw, 1.95rem);
+  --step-3: clamp(2rem, 1.6rem + 2vw, 3rem);
+
+  // ---- Spacing scale ----
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+
+  // ---- Radii ----
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+
+  // ---- Motion ----
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 140ms;
+  --dur: 240ms;
+  --dur-slow: 480ms;
+
+  --maxw: 1200px;
+}

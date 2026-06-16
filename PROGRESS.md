@@ -368,8 +368,50 @@ slice).** Tests are the spec (TDD: written first, watched fail).
   only (CLAUDE.md), and the bankroll base is available cash (the solvency-safe choice —
   equity-base could over-commit and drive cash negative).
 
+## Slice: Web design system + app shell  ✅ done (2026-06-16)
+
+First `web/` slice: scaffold the Next.js (App Router) advisor dashboard and build the
+neon-glass design language + reusable app shell. **Design system + shell only** — no data
+wiring (no BFF routes, Zod, openapi-typescript, SSE/Redis); cards render static placeholder
+signals purely to exercise the primitives.
+
+### What's done
+- **Scaffold** (`web/`): Next 15 App Router, React 19, **strict TS** (`noUncheckedIndexedAccess`
+  on), `sass` for SCSS Modules, `vitest` + RTL + jsdom. No Tailwind. **pnpm via corepack**
+  (`pnpm@9.15.0`, pinned in `packageManager`) — the system pnpm 11 needs Node ≥22.13 and is
+  unusable on this Node 20.12, so all web commands run as `corepack pnpm@9.15.0 …`.
+- **Token system** (`src/styles/tokens.scss`): dark-purple neon palette, glass-surface tokens,
+  and a runtime `--glow` intensity (1 in dark, 0.25 in light) — every neon box-shadow scales by
+  it, so light reads as crisp glass and dark as neon. `_mixins.scss` (`glass`, `neon-glow`,
+  `text-glow`, `glow-color()`) is auto-injected into every module via `next.config`
+  `sassOptions.additionalData`.
+- **Theme** (`src/lib/theme.ts` + `ThemeToggle`): `[data-theme]` on `<html>`, **defaults to
+  prefers-color-scheme**, explicit choice persisted to localStorage; a tiny no-flash inline
+  script in `<head>` sets the attribute before paint. Toggle is a real `role="switch"`.
+- **Shell + primitives**: `AppShell` (sticky glass top bar — wordmark, nav, live pill, toggle —
+  + centered max-width layout); `GlassCard` (strong/interactive/glow variants), `Badge` (gate
+  variants pass/watch/gated + dot/pulse), `EdgeMeter` (linear neon meter with a gate-threshold
+  tick; pure `edgeMeterModel` exported for tests). Demo `page.tsx` renders a ranked edge list
+  from static placeholders. Fonts via `next/font` (Syne display / Sora body / JetBrains mono).
+- **a11y**: `prefers-reduced-motion` disables the aurora drift + all transitions; meter exposes
+  `role="meter"` + `aria-valuetext`; semantic landmarks (banner/nav/main/region).
+
+### Verified
+- `cd web && corepack pnpm@9.15.0 test` → **21 passed** (theme resolution + no-flash script;
+  `edgeMeterModel` status/clamp geometry; primitive render + a11y roles; toggle flips
+  `[data-theme]` and persists).
+- `corepack pnpm@9.15.0 build` → compiles clean (strict TS + lint pass), 4 static routes.
+- **Rendered + screenshotted** dark and light via Playwright: toggle works and defaults to the
+  OS preference (Chromium's light default rendered light first, as designed). **WCAG**: measured
+  contrast on glass-over-canvas — primary text ≥15:1, dim ≥8:1, faint labels ≥6:1 (AA pass) in
+  both themes, after darkening the light-mode faint token (was 4.32:1, below AA).
+
 ## What's next
-- **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each
+- **Web data wiring** (next web slice): BFF routes (`/api/signals`, `/api/signals/[id]`,
+  `/api/stream` SSE over Redis via ioredis), `openapi-typescript` generation + Zod boundary
+  schemas, and a typed server fetcher; then wire `SignalList`/`SignalCard`/`MoneyMathBreakdown`/
+  `GateBadge` to live `/signals`, replacing the static placeholders. Design system + shell done (above).
+- **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each that detects resolved markets, matches each
   to its prior estimate(s), and writes `calibration` rows; then surface `summarize` (e.g.
   `GET /calibration`) and feed `suggest_kelly_fraction`'s `adjusted_frac` into the sizing
   knobs. Depends on trades/resolution ingestion + the fair-value `p` source.
@@ -391,7 +433,6 @@ slice).** Tests are the spec (TDD: written first, watched fail).
 - **Backtest, next steps**: feed real `resolutions` from the resolution-watcher (above);
   surface results via `GET /backtest`; add re-entry/exit policies and depth-aware arb once a
   full-book history exists; wire `favourite_longshot` once it has a probability source.
-- **Web**: Next.js BFF + dashboard (separate slice).
 
 ## Open questions / observations
 - `category` often absent from Gamma `/markets` (see above) — resolve before the fee logic needs it.

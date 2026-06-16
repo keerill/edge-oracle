@@ -1,0 +1,61 @@
+.card {
+  @include glass;
+  position: relative;
+  padding: var(--space-5);
+  color: var(--text);
+  overflow: hidden;
+
+  // Faint top edge-light that catches the eye, like real frosted glass.
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--glass-highlight),
+      transparent
+    );
+    opacity: 0.8;
+  }
+}
+
+.strong {
+  background: var(--glass-bg-strong);
+}
+
+.interactive {
+  cursor: pointer;
+  transition:
+    transform var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
+
+  &:hover {
+    transform: translateY(-3px);
+    border-color: glow-color(var(--accent), 0.8);
+  }
+}
+
+@mixin glow-accent($color) {
+  border-color: glow-color($color, 0.5);
+  @include neon-glow($color, 28px, 0.32);
+
+  &.interactive:hover {
+    @include neon-glow($color, 34px, 0.5);
+  }
+}
+
+.glow-violet {
+  @include glow-accent(var(--neon-violet));
+}
+.glow-magenta {
+  @include glow-accent(var(--neon-magenta));
+}
+.glow-cyan {
+  @include glow-accent(var(--neon-cyan));
+}
+.glow-green {
+  @include glow-accent(var(--neon-green));
+}

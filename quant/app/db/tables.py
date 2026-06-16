@@ -53,25 +53,34 @@ quotes = sa.Table(
 
 sa.Index("ix_quotes_token_time", quotes.c.token_id, quotes.c.time.desc())
 
-# Detected set-arb opportunities (one row per flagged market per scan). A *regular*
-# table, not a hypertable: opportunities are sparse and append-only, so time-chunking
-# buys little. No PK (mirrors ``quotes``); indexed by time for "latest opportunities"
-# and by (market_id, time) for a single market's history. All money is unbounded NUMERIC.
+# Detected signals — one row per flagged market per scan, across strategies. A *regular*
+# table, not a hypertable: signals are sparse and append-only, so time-chunking buys
+# little. No PK (mirrors ``quotes``). ``strategy`` tags the producer and ``kind`` is its
+# per-strategy subtype/side. The set-arb columns and the price-signal columns are mutually
+# exclusive per row (each strategy fills only its own), so all are nullable. All money is
+# unbounded NUMERIC. Indexed by time, by (market_id, time), and by (strategy, time).
 signals = sa.Table(
     "signals",
     metadata,
     sa.Column("time", sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column("market_id", sa.Text, nullable=False),
     sa.Column("condition_id", sa.Text, nullable=False),
-    sa.Column("kind", sa.Text, nullable=False),  # "long_set" | "short_set"
-    sa.Column("yes_price", sa.Numeric, nullable=False),
-    sa.Column("no_price", sa.Numeric, nullable=False),
-    sa.Column("set_size", sa.Numeric, nullable=False),
-    sa.Column("gross_edge", sa.Numeric, nullable=False),
-    sa.Column("estimated_costs", sa.Numeric, nullable=False),
-    sa.Column("net_edge", sa.Numeric, nullable=False),
-    sa.Column("hypothetical_pnl", sa.Numeric, nullable=False),
+    sa.Column("strategy", sa.Text, nullable=False, server_default=sa.text("'set_arb'")),
+    sa.Column("kind", sa.Text, nullable=False),  # per-strategy subtype/side
+    # --- set-arb columns (only ``set_arb`` rows populate these) ---
+    sa.Column("yes_price", sa.Numeric, nullable=True),
+    sa.Column("no_price", sa.Numeric, nullable=True),
+    sa.Column("set_size", sa.Numeric, nullable=True),
+    sa.Column("gross_edge", sa.Numeric, nullable=True),
+    sa.Column("estimated_costs", sa.Numeric, nullable=True),
+    sa.Column("net_edge", sa.Numeric, nullable=True),
+    sa.Column("hypothetical_pnl", sa.Numeric, nullable=True),
+    # --- price-signal columns (favourite-longshot / extreme-correction) ---
+    sa.Column("price", sa.Numeric, nullable=True),  # the market price m (the input)
+    sa.Column("edge_score", sa.Numeric, nullable=True),  # favourite-longshot, in [0, 1]
+    sa.Column("fair_value", sa.Numeric, nullable=True),  # extreme-correction corrected prob
 )
 
 sa.Index("ix_signals_market_time", signals.c.market_id, signals.c.time.desc())
 sa.Index("ix_signals_time", signals.c.time.desc())
+sa.Index("ix_signals_strategy_time", signals.c.strategy, signals.c.time.desc())

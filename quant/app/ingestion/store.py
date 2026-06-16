@@ -18,7 +18,7 @@ from app.db.tables import quotes as quotes_table
 from app.db.tables import signals as signals_table
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
-from app.models.signal import ArbSignal
+from app.models.signal import Signal
 
 # Market columns updated on conflict (everything except the PK and created_at).
 _MARKET_UPDATE_COLS = (
@@ -113,8 +113,13 @@ async def load_tracked_markets(session: AsyncSession) -> list[Market]:
     ]
 
 
-async def insert_signals(session: AsyncSession, signals: Sequence[ArbSignal]) -> int:
-    """Append detected arbitrage opportunities in a single batch insert."""
+async def insert_signals(session: AsyncSession, signals: Sequence[Signal]) -> int:
+    """Append detected signals (any strategy) in a single batch insert.
+
+    **One call must be homogeneous** — a single strategy/model type: the executemany
+    compiles its column list from the first row's ``model_dump()`` keys, so mixing shapes
+    in one call would drop columns. Each scanner persists its own strategy's batch.
+    """
     if not signals:
         return 0
     rows = [s.model_dump() for s in signals]

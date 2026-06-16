@@ -24,7 +24,7 @@ from app.db.tables import signals as signals_table
 from app.ingestion import store
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
-from app.models.signal import ArbSignal
+from app.models.signal import ArbSignal, ExtremeCorrectionSignal, FavouriteLongshotSignal
 
 TEST_DB = os.environ.get("EDGE_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(TEST_DB is None, reason="EDGE_TEST_DATABASE_URL not set")
@@ -177,6 +177,67 @@ async def test_insert_signals_decimal_roundtrip(sessionmaker):
     assert row["hypothetical_pnl"] == Decimal("0.03")
     assert row["yes_price"] == Decimal("0.46")
     assert row["kind"] == "long_set"
+    # The untouched arb insert omits ``strategy``; the server_default tags it.
+    assert row["strategy"] == "set_arb"
+    # The price-signal columns are unused by set-arb -> NULL.
+    assert row["price"] is None
+    assert row["edge_score"] is None
+    assert row["fair_value"] is None
+
+
+async def test_insert_favourite_longshot_signal_roundtrip(sessionmaker):
+    sig = FavouriteLongshotSignal(
+        time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+        market_id="m1",
+        condition_id="c1",
+        kind="buy_no",
+        price=Decimal("0.10"),
+        edge_score=Decimal("0.5"),
+    )
+    async with sessionmaker() as s:
+        n = await store.insert_signals(s, [sig])
+        await s.commit()
+    assert n == 1
+
+    async with sessionmaker() as s:
+        row = (await s.execute(sa.select(signals_table))).mappings().one()
+    assert row["strategy"] == "favourite_longshot"
+    assert row["kind"] == "buy_no"
+    # Money guard: price/score come back as exact Decimal, never float.
+    assert isinstance(row["edge_score"], Decimal)
+    assert row["price"] == Decimal("0.10")
+    assert row["edge_score"] == Decimal("0.5")
+    # The set-arb columns (and the other strategy's column) are unused -> NULL.
+    assert row["yes_price"] is None
+    assert row["net_edge"] is None
+    assert row["hypothetical_pnl"] is None
+    assert row["fair_value"] is None
+
+
+async def test_insert_extreme_correction_signal_roundtrip(sessionmaker):
+    sig = ExtremeCorrectionSignal(
+        time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+        market_id="m1",
+        condition_id="c1",
+        price=Decimal("0.04"),
+        fair_value=Decimal("0.106667"),
+    )
+    async with sessionmaker() as s:
+        n = await store.insert_signals(s, [sig])
+        await s.commit()
+    assert n == 1
+
+    async with sessionmaker() as s:
+        row = (await s.execute(sa.select(signals_table))).mappings().one()
+    assert row["strategy"] == "extreme_correction"
+    assert row["kind"] == "correction"
+    assert isinstance(row["fair_value"], Decimal)
+    assert row["price"] == Decimal("0.04")
+    assert row["fair_value"] == Decimal("0.106667")
+    # Unused columns -> NULL.
+    assert row["edge_score"] is None
+    assert row["yes_price"] is None
+    assert row["net_edge"] is None
 
 
 async def test_load_tracked_markets_returns_only_tracked(sessionmaker):

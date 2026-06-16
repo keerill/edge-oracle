@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Badge from "@/components/Badge";
 import GlassCard from "@/components/GlassCard";
+import { useNotifications } from "@/components/NotificationsProvider";
 import { AdvisedSignalListSchema, AdvisedSignalSchema, type AdvisedSignal } from "@/lib/schemas/signal";
+import { shouldToastSignal } from "@/lib/notifications";
 import { mergeSignal } from "@/lib/stream";
 import SignalsTable from "./SignalsTable";
 import styles from "./page.module.scss";
@@ -16,6 +18,9 @@ type State =
 export default function SignalsPage() {
   const [state, setState] = useState<State>({ status: "loading" });
   const [live, setLive] = useState(false);
+  const { push } = useNotifications();
+  // Last-seen signal per id, so an opportunity toast fires only on a rising edge (not every tick).
+  const lastSeen = useRef(new Map<string, AdvisedSignal>());
 
   useEffect(() => {
     let cancelled = false;
@@ -24,7 +29,10 @@ export default function SignalsPage() {
         const res = await fetch("/api/signals", { headers: { accept: "application/json" } });
         if (!res.ok) throw new Error(`Failed to load signals (HTTP ${res.status})`);
         const signals = AdvisedSignalListSchema.parse(await res.json());
-        if (!cancelled) setState({ status: "ready", signals });
+        if (!cancelled) {
+          lastSeen.current = new Map(signals.map((s) => [s.id, s]));
+          setState({ status: "ready", signals });
+        }
       } catch (err) {
         if (!cancelled) {
           setState({ status: "error", message: err instanceof Error ? err.message : "Unknown error" });
@@ -44,9 +52,19 @@ export default function SignalsPage() {
     source.onmessage = (event) => {
       const parsed = AdvisedSignalSchema.safeParse(JSON.parse(event.data));
       if (!parsed.success) return;
+      const incoming = parsed.data;
+      // Opportunity toast on a rising edge across the high-net-edge threshold.
+      if (shouldToastSignal(lastSeen.current.get(incoming.id), incoming)) {
+        push({
+          severity: "success",
+          title: "High-net-edge signal",
+          detail: `${incoming.market_question ?? incoming.market_id} · net ${(incoming.net_edge * 100).toFixed(1)}%`,
+        });
+      }
+      lastSeen.current.set(incoming.id, incoming);
       setState((prev) =>
         prev.status === "ready"
-          ? { status: "ready", signals: mergeSignal(prev.signals, parsed.data) }
+          ? { status: "ready", signals: mergeSignal(prev.signals, incoming) }
           : prev,
       );
     };
@@ -54,7 +72,7 @@ export default function SignalsPage() {
       source.close();
       setLive(false);
     };
-  }, []);
+  }, [push]);
 
   return (
     <section aria-labelledby="signals-heading">

@@ -8,3 +8,5 @@ export const QUANT_API_URL = process.env.QUANT_API_URL ?? "http://localhost:8000
 // /api/stream endpoint, never to Redis directly. Must match the quant engine's EDGE_SIGNALS_CHANNEL.
 export const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 export const SIGNALS_CHANNEL = process.env.SIGNALS_CHANNEL ?? "edge:signals";
+// Redis channel the alerts SSE route subscribes to. Must match the quant EDGE_ALERTS_CHANNEL.
+export const ALERTS_CHANNEL = process.env.ALERTS_CHANNEL ?? "edge:alerts";

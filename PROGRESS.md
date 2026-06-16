@@ -540,11 +540,79 @@ pattern, and extends the API with the two fields the pages needed. **Advisor onl
   (margin 0.02, zero slippage/gas) so the extreme-correction longshots clear the gate — the default
   costs would gate them out, leaving a degenerate (arb-only) MC.
 
+## Slice: Live arb updates — CLOB WebSocket → Redis pub/sub → SSE  ✅ done (2026-06-16)
+
+Closed the streaming loop for the **arbitrage path only**: subscribe to the Polymarket CLOB
+market WebSocket, keep an in-memory order book updated by deltas, re-run the **existing** set-arb
+math on every book change, enrich via the **existing** `advise`, publish high-net-edge signals to
+a Redis channel, and stream them to the dashboard over SSE — conflated server-side so the client
+re-renders ~10/s, not at raw WS rate. **Advisor only — detect + surface; never executes.**
+**Stream-only**: live detections are NOT written to `signals` (the periodic scan engine stays the
+source of persisted rows). No Kafka (Redis is enough at this scale).
+
+### What's done
+- **Untrusted WS boundary** (`quant/app/polymarket/schemas.py`): `RawWsBook` / `RawWsPriceChange` /
+  `RawWsChange` (prices/sizes as `str`, `extra="ignore"`) + `parse_ws_message` (dispatch on
+  `event_type`; ignore `tick_size_change`/`last_trade_price`/unknown).
+- **In-memory book, pure** (`app/streaming/book_state.py`): `LiveBook` (per-token `price→size`
+  maps; `apply_book` replaces, `apply_price_change` upserts with **size 0 = remove**;
+  `snapshot()` → canonical frozen `OrderBook`). `BookStore` (token→market index;
+  `apply(frame)` → affected `market_id`; `market_books()` → both legs once seen). **Decimal from
+  the wire string, never float** (mirrors `transform.orderbook_from_raw`).
+- **Redis publisher** (`app/streaming/redis_bus.py`): `publish_signal` → `AdvisedSignal.model_dump_json()`
+  (Pydantic renders `Decimal` as a JSON **string** — same wire contract as REST).
+- **Stream engine** (`app/streaming/engine.py`): `run_stream` is the timing-free, injectable seam —
+  consume frames → keep books live → `evaluate_market` on the affected market → dedup by `net_edge`
+  → `advise(signal, signal_id="set_arb:<market_id>", …)` → publish. Per-frame isolation (one bad
+  frame never kills the loop). `connect_clob_ws` (real `websockets` source, reconnect/backoff) +
+  CLI `python -m app.streaming.engine` (live) / `--mock` (synthetic dev feed, mirrors
+  `seed_demo --serve-mock`).
+- **Config** (`app/config.py`): `EDGE_REDIS_URL`, `EDGE_SIGNALS_CHANNEL`, `EDGE_CLOB_WS_URL`.
+  Deps: `websockets`, `redis` (quant); `ioredis` (web).
+- **Web SSE** (`web/src/app/api/stream/route.ts`, Node runtime): subscribe to Redis via ioredis,
+  **conflate** with `Conflator` (last-write-wins per id, 100ms flush → ≤10 frames/s), Zod-validate
+  each inbound message, emit `text/event-stream` with a 15s heartbeat; teardown on cancel/abort.
+- **Signals page** (`web/src/app/signals/page.tsx`): after the initial REST load, open an
+  `EventSource("/api/stream")` and `mergeSignal` each update in place (replace-by-id, else prepend;
+  `src/lib/stream.ts`, pure + tested). Badge flips **"streaming · live"** when connected, falls
+  back to "REST · reconnecting…" on error. `SignalsTable` unchanged (still sorts client-side).
+
+### Verified
+- `cd quant && uv run pytest -q` → **208 passed, 15 skipped** (was 189 offline; +19: book
+  add/update/remove + Decimal exactness, the mock-WS-feed worked example **net 0.03** = YES 0.46 +
+  NO 0.49, dedup/no-republish, malformed-frame isolation, WS-schema parse + the Decimal→string
+  wire-contract assertion). No regressions.
+- `cd web && corepack pnpm@9.15.0 test` → **66 passed** (+5: `mergeSignal` replace/prepend/no-mutate,
+  `Conflator` last-write-wins + flush-clears). `build` clean (strict TS; `/api/stream` dynamic route).
+- **Live manual check** (the task's explicit ask): `docker compose … up -d` (Redis), seeded the dev
+  DB, ran `uvicorn` + `python -m app.streaming.engine --mock` + `next dev`. `curl -N /api/stream`
+  streamed `: connected` + conflated `data:` frames. In Chrome (Playwright), `/signals` showed the
+  badge **"streaming · live"** and the three `mock-1/2/3` rows — which were **never in the REST
+  payload** — appearing live, interleaved with the seeded signals and ranked by net edge
+  (`live-signals-streaming.png`).
+
+### Money-math / correctness decisions (carry forward)
+- **Live == replay**: the stream reuses `evaluate_market` + `advise` unchanged, so a live arb edge
+  equals what the periodic scan and the backtest compute. Conflation/dedup only **drop intermediate
+  frames** — they never alter a value. **Decimal straight from the wire string**, no float.
+- **Stable id `set_arb:<market_id>`** (not the scan's `strategy:market_id:epoch_ms`) so the SSE
+  conflator and the client merge **replace the row in place** rather than appending forever.
+- **Dedup by `net_edge`**: book deltas re-fire constantly; publish only when the net edge moved.
+- **Stream-only** (no DB write at WS rates) — the `signals` table has no PK/dedup; the periodic
+  scan remains the persistence path.
+
+### Decisions locked this slice
+- **Redis pub/sub, not Kafka** (scope). The web SSE endpoint owns conflation (server-side ≤10/s),
+  keeping the client dumb. **Arb path only** — directional/price signals still flow via REST.
+- An edge that *disappears* leaves its last row on the dashboard (no "removal" event yet) — a
+  staleness/TTL policy is future work (see open questions). The live engine is a **standalone CLI**
+  (mirrors `signals/engine.py`), not a FastAPI lifespan task.
+
 ## What's next
-- **Streaming (phase 4)**: the remaining web data-wiring piece — `/api/stream` SSE over Redis
-  (ioredis) pushing live signal updates, and a client subscription that re-renders the Signals
-  table in place. BFF `/api/signals(+/[id])` + Zod boundary + typed client + the Signals page &
-  detail view are **done** (above). Optional: swap the hand-written Zod schemas for
+- **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
+  dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional
+  path once it has a live `p` source. The arb `/api/stream` SSE over Redis + the live Signals-table
+  merge are **done** (above). Optional: swap the hand-written Zod schemas for
   `openapi-typescript`-generated types off the FastAPI OpenAPI spec.
 - **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each to its
   prior estimate(s), and writes `calibration` rows; then feed `suggest_kelly_fraction`'s

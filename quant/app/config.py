@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     # --- Polymarket endpoints -------------------------------------------------
     gamma_base_url: str = "https://gamma-api.polymarket.com"
     clob_base_url: str = "https://clob.polymarket.com"
+    # CLOB market WebSocket (live order-book deltas). Public, no auth for the market channel.
+    clob_ws_url: str = "wss://ws-subscribe.clob.polymarket.com/ws/market"
+
+    # --- Streaming (live arb -> Redis pub/sub -> SSE) -------------------------
+    # The live stream re-runs the set-arb math on every book delta and publishes high-net-edge
+    # signals to a Redis channel; the web SSE endpoint subscribes and fans out to the dashboard.
+    redis_url: str = "redis://localhost:6379"
+    signals_channel: str = "edge:signals"
 
     # --- Set-arb signal scanner ----------------------------------------------
     # ``costs`` (gas + slippage) IS the flag threshold; an opportunity fires only when

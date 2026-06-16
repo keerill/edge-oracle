@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Badge from "@/components/Badge";
 import GlassCard from "@/components/GlassCard";
-import { AdvisedSignalListSchema, type AdvisedSignal } from "@/lib/schemas/signal";
+import { AdvisedSignalListSchema, AdvisedSignalSchema, type AdvisedSignal } from "@/lib/schemas/signal";
+import { mergeSignal } from "@/lib/stream";
 import SignalsTable from "./SignalsTable";
 import styles from "./page.module.scss";
 
@@ -14,6 +15,7 @@ type State =
 
 export default function SignalsPage() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [live, setLive] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,6 +36,26 @@ export default function SignalsPage() {
     };
   }, []);
 
+  // Live updates: subscribe to the server-conflated SSE stream and merge each signal in place.
+  useEffect(() => {
+    const source = new EventSource("/api/stream");
+    source.onopen = () => setLive(true);
+    source.onerror = () => setLive(false); // browser auto-reconnects; fall back to the REST view
+    source.onmessage = (event) => {
+      const parsed = AdvisedSignalSchema.safeParse(JSON.parse(event.data));
+      if (!parsed.success) return;
+      setState((prev) =>
+        prev.status === "ready"
+          ? { status: "ready", signals: mergeSignal(prev.signals, parsed.data) }
+          : prev,
+      );
+    };
+    return () => {
+      source.close();
+      setLive(false);
+    };
+  }, []);
+
   return (
     <section aria-labelledby="signals-heading">
       <div className={styles.head}>
@@ -51,9 +73,15 @@ export default function SignalsPage() {
               {state.signals.length} {state.signals.length === 1 ? "signal" : "signals"}
             </Badge>
           )}
-          <Badge variant="neutral" dot>
-            REST · streaming in phase 4
-          </Badge>
+          {live ? (
+            <Badge variant="accent" dot pulse>
+              streaming · live
+            </Badge>
+          ) : (
+            <Badge variant="neutral" dot>
+              REST · reconnecting…
+            </Badge>
+          )}
         </div>
       </div>
 

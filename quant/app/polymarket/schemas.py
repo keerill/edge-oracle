@@ -72,6 +72,61 @@ class RawOrderBook(BaseModel):
     asks: list[RawBookLevel] = []  # sent ASC by price
 
 
+# --- CLOB market WebSocket (live order-book deltas) ---------------------------
+# The `market` channel emits full `book` snapshots and `price_change` deltas (plus
+# `tick_size_change` / `last_trade_price`, which we ignore). Same untrusted-boundary
+# discipline: prices/sizes stay `str`, money is coerced to Decimal only downstream.
+
+
+class RawWsBook(BaseModel):
+    """A full order-book snapshot frame (``event_type="book"``)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    event_type: str
+    asset_id: str  # the token id this book is for
+    market: str | None = None  # condition id
+    timestamp: str | int | None = None
+    bids: list[RawBookLevel] = []
+    asks: list[RawBookLevel] = []
+
+
+class RawWsChange(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    price: str
+    size: str  # "0" => the level was removed
+    side: str  # "BUY" (bid) | "SELL" (ask)
+
+
+class RawWsPriceChange(BaseModel):
+    """A book delta frame (``event_type="price_change"``): one or more level changes."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    event_type: str
+    asset_id: str
+    market: str | None = None
+    timestamp: str | int | None = None
+    changes: list[RawWsChange] = []
+
+
+def parse_ws_message(payload: dict) -> RawWsBook | RawWsPriceChange | None:
+    """Dispatch a raw CLOB market-channel frame on ``event_type``.
+
+    Returns the validated ``book``/``price_change`` model, or ``None`` for
+    ``tick_size_change`` / ``last_trade_price`` / anything unrecognized (ignored —
+    they don't move the book levels we price arb off of). Treats the payload as
+    untrusted: a missing ``event_type`` or malformed shape yields ``None``.
+    """
+    event_type = payload.get("event_type")
+    if event_type == "book":
+        return RawWsBook.model_validate(payload)
+    if event_type == "price_change":
+        return RawWsPriceChange.model_validate(payload)
+    return None
+
+
 class RawPrice(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

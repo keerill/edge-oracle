@@ -170,13 +170,53 @@ fair-value input. **Advisor only — math + persistence; no sizing, no live scan
   (wiring `m` from the latest `quotes` midpoint on a loop is the next slice, mirroring how
   `signals/engine.py` followed `math/arb.py`). The write path is proven by the DB-gated roundtrips.
 
+## Slice: Bet-sizing (fractional Kelly + caps)  ✅ done (2026-06-16)
+
+The money-correctness core: pure position-sizing math — the Kelly fraction, fractional Kelly
+with a hard cap, the cost/edge gate, the bankroll→stake pipeline, and a per-tag correlation cap
+(one macro theme = one bet). **Advisor only — math that proposes a stake; no execution, no
+wallet, no persistence this slice.** Tests are the spec (TDD: written first, watched fail).
+
+### What's done
+- **Pure math** (`app/math/bet_sizing.py`): `kelly_fraction(p, m) = (p−m)/(1−m)` (0 on no edge),
+  `fractional_kelly(p, m, frac=0.25, cap=0.05) = min(frac·kelly, cap)` floored at 0,
+  `edge_gate(p_lo, m, half_spread, slippage, gas)` (strict `>`), `position_size(...)` (gate →
+  fractional Kelly on the ask → ×bankroll), and `cap_correlated_stakes(positions, max_per_tag)`
+  over a frozen `TaggedStake(tag, stake)`. `Decimal` in/out; no I/O, no clock, no `Settings`.
+- **Tests**: **+36** worked examples (every branch + boundary + out-of-range guard).
+
+### Verified
+- `cd quant && uv run pytest tests/test_bet_sizing.py -q` → **36 passed**.
+- `cd quant && uv run pytest -q` → **134 passed, 8 skipped** (was 98+8; +36 new, no regressions).
+- Anchor numbers reproduced by hand: `p=0.55, m=0.40 → kelly 0.25`, quarter 0.0625 **capped 0.05**;
+  the 1c-edge-vs-2c-half-spread gate returns **False**; pro-rata `300·500/600 = 250` exact.
+
+### Money-math / correctness decisions (carry forward)
+- Defaults are **`Decimal`** literals (`0.25`/`0.05`), never float. Stake ∈ `[0, bankroll·cap]`.
+- **Gate on `p_lo`** (CI lower bound), **size Kelly on `p`** (your estimate), at the **ask you pay
+  `= m + half_spread`** (`slippage`+`gas` live in the gate only). Gate is **strict `>`**
+  (break-even rejected).
+- Correlation cap is **pro-rata** per tag to a **dollar** `max_per_tag` (caller passes
+  `cap·bankroll`); the scale is `stake·max_per_tag/total` (**multiply-before-divide**, so exact
+  ratios stay exact); preserves input order; an under-cap / 0-sum group is untouched.
+- **Model-error margin** is folded into a conservative `p_lo` by the caller, not a separate
+  `edge_gate` arg (keeps the gate signature minimal); can promote to a knob with the scanner.
+
+### Decisions locked this slice
+- **Sizing math only** — no `EDGE_*` knobs, no signal model, no DB/migration, no scanner wiring
+  (mirrors how `math/longshot.py`+`math/correction.py` shipped before their scanner). `frac`/`cap`
+  are function defaults; they become `EDGE_*` knobs when a sizing scanner/endpoint lands.
+
 ## What's next
 - **Trades ingestion**: Data API `/trades` client + `trades` hypertable + poll trade prints.
 - **Category resolution**: Gamma `/markets` frequently omits `category` (observed NULL in the
   smoke run). Derive it from `events[].tags[]` so the fee table (crypto/politics/…) can key on it.
-- **More signals math**: Kelly sizing (fractional + hard cap), fee-by-category table, model
-  fair-value + CI-lower-bound gate. (Set-arb `math/arb.py` + `signals/engine.py` done; price
-  signals `math/longshot.py` + `math/correction.py` done.)
+- **More signals math**: fee-by-category table, model fair-value + CI-lower-bound gate. (Set-arb
+  `math/arb.py` + `signals/engine.py` done; price signals `math/longshot.py` +
+  `math/correction.py` done; bet-sizing `math/bet_sizing.py` done — fractional Kelly + caps.)
+- **Sizing wiring**: feed the fair-value model's `p` (mean) + CI `p_lo` (lower bound) into
+  `position_size`, attach the proposed stake to each gated signal, and add `EDGE_KELLY_*` knobs
+  (`frac`/`cap`) + a per-tag bankroll cap for `cap_correlated_stakes` — depends on the fair-value slice.
 - **Price-signal scanner**: wire the two new pure functions to a live scan — read the latest
   midpoint per market from `quotes`, evaluate, and persist on a loop with a CLI (mirrors
   `signals/engine.py`); add the `EDGE_*` knobs for their bands/nudge then. Feed `fair_value`

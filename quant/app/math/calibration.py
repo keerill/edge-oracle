@@ -19,6 +19,7 @@ from app.models.calibration import (
     CalibrationMetrics,
     CalibrationRecord,
     CalibrationSummary,
+    CalibrationTimePoint,
     KellyAdjustment,
     ReliabilityBin,
 )
@@ -132,11 +133,45 @@ def suggest_kelly_fraction(
     )
 
 
+def calibration_timeline(
+    records: Sequence[CalibrationRecord], params: CalibrationParams | None = None
+) -> list[CalibrationTimePoint]:
+    """Cumulative Brier & log-loss after each distinct journal timestamp, in time order.
+
+    Records are sorted by ``time``; one point is emitted per distinct timestamp, pooling
+    every record up to and including it (records sharing a timestamp collapse into the same
+    cumulative point). Both scores are order-independent, so the final point equals the
+    overall metrics. An empty journal yields an empty timeline — a prefix of nothing has no
+    defined score."""
+    params = params or CalibrationParams()
+    if not records:
+        return []
+    ordered = sorted(records, key=lambda r: r.time)
+    points: list[CalibrationTimePoint] = []
+    prefix: list[CalibrationRecord] = []
+    i, n = 0, len(ordered)
+    while i < n:
+        t = ordered[i].time
+        while i < n and ordered[i].time == t:  # pool every record at this timestamp
+            prefix.append(ordered[i])
+            i += 1
+        points.append(
+            CalibrationTimePoint(
+                time=t,
+                n=len(prefix),
+                brier=brier_score(prefix),
+                log_loss=log_loss(prefix, params.eps, params.ln_prec),
+            )
+        )
+    return points
+
+
 def summarize(
     records: Sequence[CalibrationRecord], params: CalibrationParams | None = None
 ) -> CalibrationSummary:
-    """Score the whole journal: Brier + log-loss overall and per strategy tag (both
-    pooled over their records), the reliability curve, and the Kelly-fraction adjustment."""
+    """Score the whole journal: Brier + log-loss overall and per strategy tag (both pooled
+    over their records), the reliability curve, the Kelly-fraction adjustment, and the
+    cumulative-over-time timeline."""
     params = params or CalibrationParams()
     per_strategy = {
         tag: _metrics([r for r in records if r.strategy == tag], params)
@@ -147,6 +182,7 @@ def summarize(
         per_strategy=per_strategy,
         reliability=reliability_curve(records, params.n_bins),
         kelly=suggest_kelly_fraction(records, params),
+        timeline=calibration_timeline(records, params),
     )
 
 

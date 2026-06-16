@@ -73,9 +73,23 @@ class KellyAdjustment(BaseModel):
     worst_bin_multiplier: Decimal | None  # min realized/claimed over the high-conf bins
 
 
+class CalibrationTimePoint(BaseModel):
+    """Cumulative Brier & log-loss through one journal timestamp — the time axis the
+    dashboard plots so a human can see whether the scores improve as evidence accrues.
+    ``n`` is how many resolved records the point pools over (records sharing a timestamp
+    collapse into one point); the final point's scores equal the overall metrics."""
+
+    model_config = ConfigDict(frozen=True)
+
+    time: datetime  # the journal timestamp this cumulative point covers (UTC)
+    n: int  # records pooled up to and including this time
+    brier: Decimal  # cumulative mean((estimate - outcome)^2)
+    log_loss: Decimal  # cumulative -mean(y*ln(p) + (1-y)*ln(1-p)), nats
+
+
 class CalibrationSummary(BaseModel):
     """Everything the journal proves in one shot: scores overall and per strategy tag,
-    the reliability curve, and the Kelly-fraction adjustment."""
+    the reliability curve, the Kelly-fraction adjustment, and the cumulative timeline."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -83,3 +97,4 @@ class CalibrationSummary(BaseModel):
     per_strategy: dict[str, CalibrationMetrics]
     reliability: list[ReliabilityBin]
     kelly: KellyAdjustment
+    timeline: list[CalibrationTimePoint]

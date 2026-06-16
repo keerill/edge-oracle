@@ -20,13 +20,14 @@ import sys
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings, get_settings
 from app.db.engine import get_sessionmaker
 from app.ingestion import store
 from app.math.arb import ArbParams, evaluate_market
-from app.math.backtest import simulate
+from app.math.backtest import simulate_with_distribution
 from app.math.correction import CorrectionParams, evaluate_extreme_correction
 from app.models.backtest import BacktestParams, BacktestResult, BetCandidate, MarketResolution
 from app.models.book import BookLevel, OrderBook
@@ -233,7 +234,11 @@ async def run_backtest_once(
         gas=settings.arb_gas,
     )
     outcomes = {cid: r.outcome for cid, r in resolutions.items()}
-    return simulate(candidates, outcomes, _backtest_params(settings))
+    # Offload the synchronous compute: monte_carlo re-runs simulate mc_sims times, which would
+    # otherwise block the event loop on a request thread.
+    return await run_in_threadpool(
+        simulate_with_distribution, candidates, outcomes, _backtest_params(settings)
+    )
 
 
 def _load_resolutions(path: str) -> dict[str, MarketResolution]:

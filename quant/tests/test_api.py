@@ -198,6 +198,9 @@ async def test_calibration_summary(client):
     body = resp.json()
     assert body is not None
     assert body["overall"]["n"] == 2
+    # The cumulative timeline rides along: both records share a timestamp -> one pooled point.
+    assert len(body["timeline"]) == 1
+    assert body["timeline"][0]["n"] == 2
 
 
 async def test_backtest_zero_bets_without_resolutions(client):
@@ -206,3 +209,5 @@ async def test_backtest_zero_bets_without_resolutions(client):
     body = resp.json()
     assert body["n_bets"] == 0
     assert Decimal(body["initial_bankroll"]) == Decimal("1000")
+    # No bets -> the resampled distribution is undefined and serializes as null.
+    assert body["monte_carlo"] is None

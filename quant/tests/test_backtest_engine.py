@@ -191,3 +191,8 @@ async def test_run_backtest_once_replays_a_seeded_arb_end_to_end(sessionmaker):
     assert res.final_bankroll == Decimal("1000.03")  # +0.03 locked edge, outcome-independent
     assert "set_arb" in res.per_strategy
     assert res.per_strategy["set_arb"].total_pnl == Decimal("0.03")
+    # Monte-Carlo rides along: an arb's edge is outcome-independent, so every resampled sim
+    # lands at 1000.03 — a degenerate (but present) distribution that never loses.
+    assert res.monte_carlo is not None
+    assert res.monte_carlo.final_bankroll_median == Decimal("1000.03")
+    assert res.monte_carlo.prob_loss == Decimal("0")

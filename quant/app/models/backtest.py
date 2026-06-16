@@ -126,6 +126,22 @@ class StrategyBreakdown(BaseModel):
     sharpe_like: Decimal | None
 
 
+class MonteCarloResult(BaseModel):
+    """Distribution of outcomes over resampled simulations — variance, not just the mean."""
+
+    model_config = ConfigDict(frozen=True)
+
+    n_sims: int
+    final_bankroll_p5: Decimal
+    final_bankroll_p25: Decimal
+    final_bankroll_median: Decimal
+    final_bankroll_p75: Decimal
+    final_bankroll_p95: Decimal
+    final_bankroll_mean: Decimal
+    median_max_drawdown: Decimal
+    prob_loss: Decimal  # fraction of sims ending below the initial bankroll
+
+
 class BacktestResult(BaseModel):
     """Everything the deterministic replay reports (costs baked in throughout)."""
 
@@ -141,22 +157,10 @@ class BacktestResult(BaseModel):
     per_strategy: dict[str, StrategyBreakdown]
     equity_curve: tuple[EquityPoint, ...]
     closed_bets: tuple[ClosedBet, ...]
-
-
-class MonteCarloResult(BaseModel):
-    """Distribution of outcomes over resampled simulations — variance, not just the mean."""
-
-    model_config = ConfigDict(frozen=True)
-
-    n_sims: int
-    final_bankroll_p5: Decimal
-    final_bankroll_p25: Decimal
-    final_bankroll_median: Decimal
-    final_bankroll_p75: Decimal
-    final_bankroll_p95: Decimal
-    final_bankroll_mean: Decimal
-    median_max_drawdown: Decimal
-    prob_loss: Decimal  # fraction of sims ending below the initial bankroll
+    # Resampled-outcome distribution (variance, not just the median). ``None`` when the replay
+    # took no bets — a distribution over nothing is undefined. Populated by the API path
+    # (``simulate_with_distribution``); plain ``simulate`` leaves it ``None``.
+    monte_carlo: MonteCarloResult | None = None
 
 
 class BacktestParams(BaseModel):

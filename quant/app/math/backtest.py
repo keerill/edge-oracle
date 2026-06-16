@@ -230,6 +230,24 @@ def _build_result(
     )
 
 
+def simulate_with_distribution(
+    candidates: Sequence[BetCandidate],
+    outcomes: Mapping[str, int],
+    params: BacktestParams,
+) -> BacktestResult:
+    """The deterministic replay PLUS the Monte-Carlo distribution attached.
+
+    This is the heavy path the API serves: :func:`monte_carlo` re-runs :func:`simulate`
+    ``mc_sims`` times, so callers that only need the single realized path keep using
+    :func:`simulate` directly. ``monte_carlo`` stays ``None`` when there are no candidates —
+    a distribution over an empty replay is undefined. Deterministic: ``monte_carlo`` seeds
+    its RNG from ``params.mc_seed``, so the same inputs always yield the same distribution.
+    """
+    result = simulate(candidates, outcomes, params)
+    mc = monte_carlo(candidates, params, base_outcomes=outcomes) if candidates else None
+    return result.model_copy(update={"monte_carlo": mc})
+
+
 def _percentile(sorted_vals: Sequence[Decimal], pct: int) -> Decimal:
     """Nearest-rank percentile of an already-sorted, non-empty sequence."""
     idx = min(len(sorted_vals) - 1, (pct * len(sorted_vals)) // 100)

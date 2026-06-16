@@ -15,12 +15,13 @@ import pytest
 from app.math.calibration import (
     CalibrationParams,
     brier_score,
+    calibration_timeline,
     log_loss,
     reliability_curve,
     suggest_kelly_fraction,
     summarize,
 )
-from app.models.calibration import CalibrationRecord, KellyAdjustment
+from app.models.calibration import CalibrationRecord, CalibrationTimePoint, KellyAdjustment
 
 Q6 = Decimal("0.000001")
 _T = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -35,6 +36,19 @@ def _rec(estimate: str, outcome: int, strategy: str = "s", m: str = "0.5") -> Ca
         strategy=strategy,
         estimate=Decimal(estimate),
         price=Decimal(m),
+        outcome=outcome,
+    )
+
+
+def _rec_at(day: int, estimate: str, outcome: int, strategy: str = "s") -> CalibrationRecord:
+    """A calibration record stamped on ``2026-01-<day>`` (for the cumulative timeline)."""
+    return CalibrationRecord(
+        time=datetime(2026, 1, day, tzinfo=timezone.utc),
+        market_id="m1",
+        condition_id="c1",
+        strategy=strategy,
+        estimate=Decimal(estimate),
+        price=Decimal("0.5"),
         outcome=outcome,
     )
 
@@ -214,3 +228,50 @@ def test_summary_per_strategy_is_pooled_not_mean_of_means():
     # the curve and the adjustment ride along
     assert len(summ.reliability) == 10
     assert isinstance(summ.kelly, KellyAdjustment)
+
+
+# --- Cumulative timeline (Brier / log-loss over the journal's time axis) --------
+
+def test_calibration_timeline_empty_is_empty():
+    # Scoring an empty prefix is undefined; the timeline of nothing is the empty list.
+    assert calibration_timeline([]) == []
+
+
+def test_calibration_timeline_cumulative_through_distinct_times():
+    # day1: two p=0.5 (one YES, one NO) -> cumulative Brier 0.25, log-loss ln(2).
+    # day2: + one perfect p=0.0/outcome 0 -> cumulative Brier (0.25*2 + 0)/3 = 0.5/3,
+    #   log-loss -(ln 0.5 + ln 0.5 + ln(1-eps))/3 = 2*ln(2)/3 = 0.4620981...
+    recs = [_rec_at(1, "0.5", 1), _rec_at(1, "0.5", 0), _rec_at(2, "0.0", 0)]
+    tl = calibration_timeline(recs)
+
+    assert len(tl) == 2  # one point per distinct timestamp
+    assert isinstance(tl[0], CalibrationTimePoint)
+
+    assert tl[0].n == 2
+    assert tl[0].brier == Decimal("0.25")
+    assert tl[0].log_loss.quantize(Q6) == Decimal("0.693147")
+
+    assert tl[1].n == 3
+    assert tl[1].brier.quantize(Q6) == Decimal("0.166667")
+    assert tl[1].log_loss.quantize(Q6) == Decimal("0.462098")
+
+
+def test_calibration_timeline_sorts_and_final_point_equals_overall():
+    # Given out of time order: points come out ascending in time, and the final cumulative
+    # point covers every record -> its scores are exactly the overall metrics.
+    recs = [_rec_at(2, "0.0", 0), _rec_at(1, "0.5", 1), _rec_at(1, "0.5", 0)]
+    tl = calibration_timeline(recs)
+    summ = summarize(recs)
+
+    assert [p.time for p in tl] == sorted(p.time for p in tl)
+    assert tl[-1].n == summ.overall.n == 3
+    assert tl[-1].brier == summ.overall.brier  # order-independent -> exact equality
+    assert tl[-1].log_loss == summ.overall.log_loss
+
+
+def test_summary_includes_timeline():
+    recs = [_rec_at(1, "0.5", 1), _rec_at(2, "0.5", 0)]
+    summ = summarize(recs)
+    assert isinstance(summ.timeline, list)
+    assert len(summ.timeline) == 2
+    assert summ.timeline[-1].n == 2

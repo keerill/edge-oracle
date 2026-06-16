@@ -23,6 +23,7 @@ from app.math.backtest import (
     realized_pnl,
     sharpe_like,
     simulate,
+    simulate_with_distribution,
     total_return,
 )
 from app.models.backtest import BacktestParams, BetCandidate, ClosedBet
@@ -332,3 +333,33 @@ def test_monte_carlo_surfaces_variance_and_orders_percentiles():
     assert res.final_bankroll_p5 < res.final_bankroll_p95  # genuine spread, not a point mass
     assert Decimal("0") < res.prob_loss < Decimal("1")
     assert Decimal("0") <= res.median_max_drawdown <= Decimal("1")
+
+
+# --------------------------------------------------------------------------- simulate_with_distribution
+
+
+def test_simulate_with_distribution_attaches_deterministic_mc():
+    # The API path: deterministic replay PLUS the resampled distribution. The deterministic
+    # fields must match plain simulate(), and the attached distribution must equal a direct
+    # monte_carlo() with the params seed (so the endpoint is reproducible).
+    params = BacktestParams(mc_sigma=Decimal("0.05"), mc_sims=200)
+    cand = _directional(p_yes="0.50", p_side="0.50", p_lo_side="0.30")
+
+    res = simulate_with_distribution([cand], {"c": 1}, params)
+    plain = simulate([cand], {"c": 1}, params)
+
+    # deterministic part is untouched
+    assert res.final_bankroll == plain.final_bankroll
+    assert res.n_bets == plain.n_bets == 1
+    # the distribution rides along, deterministic from the seed
+    assert res.monte_carlo is not None
+    assert res.monte_carlo.n_sims == 200
+    assert res.monte_carlo == monte_carlo([cand], params, base_outcomes={"c": 1})
+
+
+def test_simulate_with_distribution_no_candidates_has_no_distribution():
+    # With nothing to bet, the resampled distribution is undefined -> monte_carlo stays None
+    # (and the deterministic zero-bet report still renders).
+    res = simulate_with_distribution([], {}, BacktestParams())
+    assert res.n_bets == 0
+    assert res.monte_carlo is None

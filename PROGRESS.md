@@ -469,18 +469,89 @@ slice adds the endpoints, a typed Zod-validated web client, a sortable **Signals
   resolution-watcher yet); **`/calibration`** returns `null` on an empty journal (scoring zero
   records is undefined).
 
+## Slice: Calibration + Backtest dashboard pages (the views that keep you honest)  ✅ done (2026-06-16)
+
+The accountability UI: two dashboard pages that surface whether the advisor's probabilities are
+real (Calibration) and how the strategy behaves over a full replay including the *distribution*
+of outcomes, not just the median (Backtest). The math + endpoints existed; this slice builds the
+views, with **hand-rolled SVG charts (no new dependency)** following the existing `EdgeMeter`
+pattern, and extends the API with the two fields the pages needed. **Advisor only — read views.**
+
+### What's done
+- **Quant API extensions** (reuse already-tested math; no new money-math):
+  - `calibration_timeline` (`app/math/calibration.py`) — cumulative Brier & log-loss per distinct
+    journal timestamp (the final point equals the overall metrics); `CalibrationTimePoint` +
+    `timeline` on `CalibrationSummary`. Wired into `summarize`.
+  - `simulate_with_distribution` (`app/math/backtest.py`) — the deterministic replay **plus** the
+    existing `monte_carlo` attached (`None` for a zero-bet replay); nullable `monte_carlo` on
+    `BacktestResult`; `run_backtest_once` calls it via `run_in_threadpool` (MC re-runs `simulate`
+    `mc_sims`× and must not block the event loop). Deterministic via `mc_seed`.
+- **Charting** (`web/src/lib/charts.ts`, pure + tested): `linearScale`, `buildLinePath`,
+  `buildAreaPath`, `niceTicks`, `plotArea`. No charting library added (SPEC.md never named one;
+  CLAUDE.md requires approving deps — decided with the user to hand-roll).
+- **Chart components** (`web/src/components/charts/`, each a pure `*Model()` geometry fn + a
+  thin `"use client"` SVG): `ReliabilityChart` (claimed-vs-realized + y=x diagonal, dots ∝ count),
+  `MetricTimeline` (cumulative Brier & log-loss), `EquityCurve` (area + peak→trough drawdown band),
+  `MonteCarloChart` (p5–p95 whisker / p25–p75 box / median / mean / start reference). Neon tokens;
+  glows scale with `--glow` so light mode dims via the same CSS.
+- **Pages** (`web/src/app/{calibration,backtest}/`): server components fetch + Zod-validate via the
+  existing `getCalibration`/`getBacktest` (no new BFF route — mirrors the signal *detail* page),
+  delegating to presentational `CalibrationView`/`BacktestView` (render from props → unit-testable).
+  Calibration leads with the **Kelly-shrink hero** (adjusted fraction, overconfidence badge,
+  diagnostics), then KPIs, both charts, per-strategy table; null-journal empty state. Backtest:
+  KPIs, equity curve, the Monte-Carlo distribution, per-strategy table; zero-bet explainer state.
+  `report.ts` Zod gains the `timeline` + `monte_carlo` shapes; `AppShell` nav links activated.
+- **Demo seed** (`quant/app/seed_demo.py`, dev only): builds an overconfident calibration journal
+  + extreme/arb markets whose quotes replay into real bets; modes `--dry-run`, `--serve-mock`
+  (serves the seeded reports from the real quant math, no DB), and a DB seed + resolutions JSON.
+
+### Verified
+- `cd quant && uv run pytest -q` → **189 passed, 15 skipped** (DB-gated); +4 calibration-timeline
+  worked examples, +2 `simulate_with_distribution` (deterministic MC present / `None` for no bets),
+  + MC & timeline assertions added to the DB-gated engine + API tests.
+- `cd web && corepack pnpm@9.15.0 test` → **61 passed** (+33: schema coercion incl. timeline +
+  monte_carlo, chart geometry incl. exact coordinates, view renders incl. empty / insufficient /
+  zero-bet states). `tsc --noEmit` strict clean; `next build` green (9 routes; `/calibration` +
+  `/backtest` dynamic, server-rendered).
+- **Seed dry-run** → calibration 35 records (Kelly shrinks 0.25→**0.224**, 6 timeline points, 3
+  strategies); backtest 5 bets, **+63.8%**, max DD 1.1%, MC over 1000 sims spanning $942→$1418,
+  P(loss) 59% (the longshot character — a real spread, not a point mass).
+- **Screenshots** (isolated headless Chrome, dark/canonical theme; the data served from the real
+  quant math via `seed_demo --serve-mock`): both pages match the neon-glass design system — glass
+  cards, neon palette (cyan equity / violet MC box / red drawdown band), mono numerals, the Kelly
+  hero, the reliability dots below the diagonal, and the Monte-Carlo box-and-whisker. (Light reuses
+  the same token-driven components; the MCP browser profile was locked, so headless was used.)
+
+### Money-math / correctness decisions (carry forward)
+- **No new money-math**: the timeline reuses `brier_score`/`log_loss` applied cumulatively (worked-
+  example tested before use); the MC path reuses `monte_carlo` unchanged (its only float still just
+  decides a 0/1 outcome — bankroll stays exact Decimal). Decimal→JSON-string contract unchanged.
+- **Kelly adjustment is display-only** here — surfaced prominently, but **not** fed into the live
+  sizing knobs (that stays a future wiring item).
+- Charts derive geometry in pure `*Model()` fns (unit-tested with exact coordinates), separate from
+  rendering — same discipline as `edgeMeterModel`.
+
+### Decisions locked this slice
+- **Hand-rolled SVG, zero new deps** (vs Recharts/visx) — SPEC.md named no charting lib and both
+  SPEC §9 + CLAUDE.md gate new deps; the `EdgeMeter` precedent makes SVG the on-pattern choice.
+- **Server-component pages + client chart children**; no new BFF route (the typed client is called
+  directly, like the signal detail page).
+- `seed_demo.py` is **dev tooling, not a migration**; it runs the backtest with demo-friendly knobs
+  (margin 0.02, zero slippage/gas) so the extreme-correction longshots clear the gate — the default
+  costs would gate them out, leaving a degenerate (arb-only) MC.
+
 ## What's next
 - **Streaming (phase 4)**: the remaining web data-wiring piece — `/api/stream` SSE over Redis
   (ioredis) pushing live signal updates, and a client subscription that re-renders the Signals
   table in place. BFF `/api/signals(+/[id])` + Zod boundary + typed client + the Signals page &
   detail view are **done** (above). Optional: swap the hand-written Zod schemas for
   `openapi-typescript`-generated types off the FastAPI OpenAPI spec.
-- **Calibration/backtest UI**: the `GET /calibration` and `GET /backtest` endpoints exist; add the
-  dashboard pages (reliability curve, equity curve) that consume the already-typed client stubs.
-- **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each that detects resolved markets, matches each
-  to its prior estimate(s), and writes `calibration` rows; then surface `summarize` (e.g.
-  `GET /calibration`) and feed `suggest_kelly_fraction`'s `adjusted_frac` into the sizing
-  knobs. Depends on trades/resolution ingestion + the fair-value `p` source.
+- **Calibration wiring**: a resolution-watcher that detects resolved markets, matches each to its
+  prior estimate(s), and writes `calibration` rows; then feed `suggest_kelly_fraction`'s
+  `adjusted_frac` into the **live sizing knobs**. The Calibration/Backtest **dashboard pages are
+  done** (above) — they consume the typed client and surface the suggested fraction prominently,
+  but display-only; closing the loop into sizing is the remaining work. Depends on
+  trades/resolution ingestion + the fair-value `p` source.
 - **Trades ingestion**: Data API `/trades` client + `trades` hypertable + poll trade prints.
 - **Category resolution**: Gamma `/markets` frequently omits `category` (observed NULL in the
   smoke run). Derive it from `events[].tags[]` so the fee table (crypto/politics/…) can key on it.

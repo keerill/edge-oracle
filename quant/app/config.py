@@ -1,12 +1,13 @@
 """Runtime configuration (pydantic-settings). Single source of truth.
 
 All values are overridable via ``EDGE_``-prefixed environment variables or a local
-``.env`` file. No money values flow through config in the ingestion slice — only
-endpoints, cadences, and HTTP/backoff knobs.
+``.env`` file. Most knobs are endpoints, cadences, and HTTP/backoff; the set-arb
+scanner adds a few money knobs (gas/slippage/threshold) — kept as ``Decimal``.
 """
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,6 +36,15 @@ class Settings(BaseSettings):
     # --- Polymarket endpoints -------------------------------------------------
     gamma_base_url: str = "https://gamma-api.polymarket.com"
     clob_base_url: str = "https://clob.polymarket.com"
+
+    # --- Set-arb signal scanner ----------------------------------------------
+    # ``costs`` (gas + slippage) IS the flag threshold; an opportunity fires only when
+    # net = gross - costs strictly exceeds ``arb_min_net_edge`` (an extra gate, off by
+    # default). Money knobs are Decimal (env strings parse exactly: EDGE_ARB_GAS=0.015).
+    arb_set_size: Decimal = Decimal(1)  # complete sets (1 YES + 1 NO) to price each edge for
+    arb_gas: Decimal = Decimal("0.01")  # per-set on-chain cost estimate (split/merge/redeem)
+    arb_slippage: Decimal = Decimal("0.01")  # per-set buffer beyond modeled book depth
+    arb_min_net_edge: Decimal = Decimal(0)  # extra profit gate; flag only when net > this
 
     # --- HTTP / backoff / throttle -------------------------------------------
     http_timeout_s: float = 10.0

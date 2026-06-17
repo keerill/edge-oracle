@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import backtest, calibration, signals
+from app.api import backtest, calibration, config, signals
 from app.api.security import RateLimiter, cors_origins, require_api_key
 from app.config import get_settings
 from app.observability.logging import configure_logging
@@ -80,6 +80,7 @@ _guard = [Depends(require_api_key)]
 app.include_router(signals.router, dependencies=_guard)
 app.include_router(calibration.router, dependencies=_guard)
 app.include_router(backtest.router, dependencies=_guard)
+app.include_router(config.router, dependencies=_guard)
 
 @app.get("/metrics")
 def metrics() -> Response:

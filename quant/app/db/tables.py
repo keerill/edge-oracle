@@ -124,3 +124,21 @@ calibration = sa.Table(
 
 sa.Index("ix_calibration_time", calibration.c.time.desc())
 sa.Index("ix_calibration_strategy_time", calibration.c.strategy, calibration.c.time.desc())
+
+# Personal sizing / risk preferences — a single-row table keyed by a constant ``id`` (default
+# 'default'), so the dashboard's bankroll & risk knobs persist across restarts and are applied
+# server-side uniformly. All money/fractions are unbounded NUMERIC (Decimal). ``updated_at`` is
+# refreshed on every upsert.
+user_config = sa.Table(
+    "user_config",
+    metadata,
+    sa.Column("id", sa.Text, primary_key=True, server_default=sa.text("'default'")),
+    sa.Column("bankroll", sa.Numeric, nullable=False),
+    sa.Column("kelly_frac", sa.Numeric, nullable=False),
+    sa.Column("kelly_cap", sa.Numeric, nullable=False),
+    sa.Column("corr_cap_frac", sa.Numeric, nullable=False),
+    sa.Column("risk_threshold", sa.Numeric, nullable=False),
+    sa.Column(
+        "updated_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")
+    ),
+)

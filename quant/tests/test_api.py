@@ -203,6 +203,65 @@ async def test_calibration_summary(client):
     assert body["timeline"][0]["n"] == 2
 
 
+async def test_config_defaults_then_persists_and_resizes(client):
+    # No row yet -> effective config is the env defaults.
+    cfg = (await client.get("/config")).json()
+    assert Decimal(cfg["bankroll"]) == Decimal("1000")
+    assert Decimal(cfg["kelly_frac"]) == Decimal("0.25")
+    assert Decimal(cfg["risk_threshold"]) == Decimal("1")
+
+    # Persist a bigger bankroll; the cap (5%) now binds at 2000 * 0.05 = 100.00.
+    put = await client.put(
+        "/config",
+        json={
+            "bankroll": "2000",
+            "kelly_frac": "0.25",
+            "kelly_cap": "0.05",
+            "corr_cap_frac": "0.05",
+            "risk_threshold": "0.5",
+        },
+    )
+    assert put.status_code == 200
+    assert (await client.get("/config")).json()["bankroll"] == "2000"
+
+    listing = (await client.get("/signals")).json()
+    correction = next(d for d in listing if d["strategy"] == "extreme_correction")
+    assert Decimal(correction["recommended_size_usd"]) == Decimal("100.00")  # 2000 * 0.05
+
+
+async def test_config_rejects_out_of_range(client):
+    bad = await client.put(
+        "/config",
+        json={
+            "bankroll": "1000",
+            "kelly_frac": "1.5",  # > 1 -> rejected
+            "kelly_cap": "0.05",
+            "corr_cap_frac": "0.05",
+            "risk_threshold": "0.5",
+        },
+    )
+    assert bad.status_code == 422
+
+
+async def test_economics_surfaced_on_signals(client):
+    listing = (await client.get("/signals")).json()
+    correction = next(d for d in listing if d["strategy"] == "extreme_correction")
+    econ = correction["economics"]
+    assert econ is not None
+    assert econ["ask"] == "0.44"  # all-in threshold
+    assert isinstance(econ["ev_usd"], str)  # Decimal-as-string contract
+    assert econ["prob_of_loss"] == "0.45"  # 1 - 0.55
+    arb = next(d for d in listing if d["strategy"] == "set_arb")
+    assert Decimal(arb["economics"]["locked_profit_usd"]) == Decimal("0.03")
+    assert arb["economics"]["prob_of_loss"] == "0"
+
+
+async def test_safe_only_sort_puts_arb_first(client):
+    data = (await client.get("/signals?sort=safety&safe_only=true")).json()
+    # longshot (tier 2) dropped; arb (tier 0) first, then gate-passing correction (tier 1).
+    assert [d["strategy"] for d in data] == ["set_arb", "extreme_correction"]
+
+
 async def test_backtest_zero_bets_without_resolutions(client):
     resp = await client.get("/backtest")
     assert resp.status_code == 200

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.advisor.ranking import rank_signals
 from app.advisor.view import advise
+from app.api.config import effective_config
 from app.api.deps import get_app_settings, get_session
 from app.config import Settings
 from app.ingestion import store
@@ -51,15 +52,15 @@ def _parse_id(raw: str) -> tuple[str, str, int]:
         raise HTTPException(status_code=422, detail=f"malformed signal id: {raw!r}") from exc
 
 
-async def effective_kelly_frac(session: AsyncSession, settings: Settings) -> Decimal:
-    """The live Kelly fraction: the configured ``kelly_frac``, shrunk (never raised) by the
-    calibration journal when the model has proven overconfident. Falls back to the configured
-    value on an empty journal or when there's no high-confidence evidence yet."""
+async def effective_kelly_frac(session: AsyncSession, base_frac: Decimal) -> Decimal:
+    """The live Kelly fraction: the user's ``base_frac``, shrunk (never raised) by the
+    calibration journal when the model has proven overconfident. Falls back to ``base_frac``
+    on an empty journal or when there's no high-confidence evidence yet."""
     records = await store.load_calibration(session)
     if not records:
-        return settings.kelly_frac
-    adjusted = summarize(records, CalibrationParams(base_frac=settings.kelly_frac)).kelly.adjusted_frac
-    return adjusted if adjusted is not None else settings.kelly_frac
+        return base_frac
+    adjusted = summarize(records, CalibrationParams(base_frac=base_frac)).kelly.adjusted_frac
+    return adjusted if adjusted is not None else base_frac
 
 
 def _enrich(
@@ -69,6 +70,7 @@ def _enrich(
     settings: Settings,
     bankroll: Decimal,
     frac: Decimal,
+    cap: Decimal,
 ) -> AdvisedSignal:
     market = markets_by_id.get(signal.market_id)
     yes_quote = quotes_by_token.get(market.yes_token_id) if market else None
@@ -81,16 +83,16 @@ def _enrich(
         no_quote=no_quote,
         bankroll=bankroll,
         frac=frac,
-        cap=settings.kelly_cap,
+        cap=cap,
         slippage=settings.arb_slippage,
         gas=settings.arb_gas,
         model_error_margin=settings.model_error_margin,
     )
 
 
-def _bankroll(settings: Settings, override: str | None) -> Decimal:
+def _bankroll(default: Decimal, override: str | None) -> Decimal:
     if override is None:
-        return settings.backtest_initial_bankroll
+        return default
     try:
         value = Decimal(override)
     except InvalidOperation as exc:
@@ -125,16 +127,20 @@ async def list_signals(
     """Current signals, enriched with sizing. ``sort=net_edge`` (default, descending) or
     ``sort=safety`` (risk-free arb first, then gate-passing directional, then the rest).
     ``safe_only`` and ``min_net_edge`` filter the list."""
-    bank = _bankroll(settings, bankroll)
+    cfg = await effective_config(session, settings)
+    bank = _bankroll(cfg.bankroll, bankroll)
     floor = _min_net_edge(min_net_edge)
     signals = await store.load_signals(session, strategy=strategy, limit=limit)
     markets = await store.load_tracked_markets(session)
     markets_by_id = {m.market_id: m for m in markets}
     token_ids = [tid for m in markets for tid in (m.yes_token_id, m.no_token_id)]
     quotes_by_token = await store.load_latest_quotes(session, token_ids=token_ids or None)
-    frac = await effective_kelly_frac(session, settings)
+    frac = await effective_kelly_frac(session, cfg.kelly_frac)
 
-    advised = [_enrich(s, markets_by_id, quotes_by_token, settings, bank, frac) for s in signals]
+    advised = [
+        _enrich(s, markets_by_id, quotes_by_token, settings, bank, frac, cfg.kelly_cap)
+        for s in signals
+    ]
     return rank_signals(advised, sort=sort, safe_only=safe_only, min_net_edge=floor)
 
 
@@ -146,7 +152,8 @@ async def get_signal(
     bankroll: str | None = Query(None),
 ) -> AdvisedSignal:
     """One signal's full sizing breakdown + cost-gate components."""
-    bank = _bankroll(settings, bankroll)
+    cfg = await effective_config(session, settings)
+    bank = _bankroll(cfg.bankroll, bankroll)
     strategy, market_id, epoch_ms = _parse_id(signal_id)
     candidates = await store.load_signals(session, strategy=strategy, limit=500)
     match = next(
@@ -165,5 +172,5 @@ async def get_signal(
     market = markets_by_id.get(market_id)
     token_ids = [market.yes_token_id, market.no_token_id] if market else None
     quotes_by_token = await store.load_latest_quotes(session, token_ids=token_ids)
-    frac = await effective_kelly_frac(session, settings)
-    return _enrich(match, markets_by_id, quotes_by_token, settings, bank, frac)
+    frac = await effective_kelly_frac(session, cfg.kelly_frac)
+    return _enrich(match, markets_by_id, quotes_by_token, settings, bank, frac, cfg.kelly_cap)

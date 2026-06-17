@@ -19,7 +19,9 @@ from app.db.tables import markets as markets_table
 from app.db.tables import quotes as quotes_table
 from app.db.tables import signals as signals_table
 from app.db.tables import trades as trades_table
+from app.db.tables import user_config as user_config_table
 from app.models.calibration import CalibrationRecord
+from app.models.config import UserConfig
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 from app.models.signal import (
@@ -310,6 +312,39 @@ async def insert_calibration(
     rows = [r.model_dump() for r in records]
     await session.execute(insert(calibration_table), rows)
     return len(rows)
+
+
+_USER_CONFIG_ID = "default"
+_USER_CONFIG_COLS = ("bankroll", "kelly_frac", "kelly_cap", "corr_cap_frac", "risk_threshold")
+
+
+async def load_user_config(session: AsyncSession) -> UserConfig | None:
+    """Load the single persisted user config, or ``None`` if none has been saved yet (the
+    caller then falls back to ``UserConfig.from_settings``)."""
+    row = (
+        await session.execute(
+            select(user_config_table).where(user_config_table.c.id == _USER_CONFIG_ID)
+        )
+    ).mappings().first()
+    if row is None:
+        return None
+    return UserConfig(
+        bankroll=row["bankroll"],
+        kelly_frac=row["kelly_frac"],
+        kelly_cap=row["kelly_cap"],
+        corr_cap_frac=row["corr_cap_frac"],
+        risk_threshold=row["risk_threshold"],
+    )
+
+
+async def upsert_user_config(session: AsyncSession, config: UserConfig) -> None:
+    """Persist the user config to the single 'default' row (insert or update in place)."""
+    values = {"id": _USER_CONFIG_ID, **{c: getattr(config, c) for c in _USER_CONFIG_COLS}}
+    stmt = pg_insert(user_config_table).values(values)
+    set_ = {c: getattr(stmt.excluded, c) for c in _USER_CONFIG_COLS}
+    set_["updated_at"] = func.now()
+    stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=set_)
+    await session.execute(stmt)
 
 
 async def load_calibration(

@@ -132,7 +132,7 @@ async def test_effective_frac_falls_back_on_empty_journal(monkeypatch):
 
     monkeypatch.setattr(store, "load_calibration", empty)
     s = Settings(kelly_frac=Decimal("0.25"))
-    assert await effective_kelly_frac(None, s) == Decimal("0.25")
+    assert await effective_kelly_frac(None, s.kelly_frac) == Decimal("0.25")
 
 
 async def test_effective_frac_shrinks_when_overconfident(monkeypatch):
@@ -149,6 +149,6 @@ async def test_effective_frac_shrinks_when_overconfident(monkeypatch):
 
     monkeypatch.setattr(store, "load_calibration", load)
     s = Settings(kelly_frac=Decimal("0.25"))
-    frac = await effective_kelly_frac(None, s)
+    frac = await effective_kelly_frac(None, s.kelly_frac)
     assert frac < Decimal("0.25")  # shrunk by the overconfidence
     assert frac == Decimal("0.1875")  # 0.25 * (6/8 realized/claimed in the high-conf bins)

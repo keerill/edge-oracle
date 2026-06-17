@@ -23,6 +23,20 @@ export const GateBreakdownSchema = z.object({
 });
 export type GateBreakdown = z.infer<typeof GateBreakdownSchema>;
 
+// The dollar view of a bet (computed by quant from the user's bankroll). Most fields are
+// nullable so directional + arb share one shape; longshot carries no economics at all.
+export const EconomicsSchema = z.object({
+  ask: money.nullable(),
+  stake_usd: money.nullable(),
+  profit_if_win_usd: money.nullable(),
+  profit_if_loss_usd: money.nullable(),
+  ev_usd: money.nullable(),
+  ev_usd_conservative: money.nullable(),
+  prob_of_loss: money.nullable(),
+  locked_profit_usd: money.nullable(),
+});
+export type Economics = z.infer<typeof EconomicsSchema>;
+
 export const AdvisedSignalSchema = z.object({
   id: z.string(),
   time: z.string(), // ISO-8601 (UTC)
@@ -40,6 +54,7 @@ export const AdvisedSignalSchema = z.object({
   confidence: money,
   gate_passed: z.boolean(),
   gate: GateBreakdownSchema.nullable(),
+  economics: EconomicsSchema.nullable().default(null),
 });
 export type AdvisedSignal = z.infer<typeof AdvisedSignalSchema>;
 

@@ -20,6 +20,7 @@ function sig(over: Partial<AdvisedSignal>): AdvisedSignal {
     confidence: 1,
     gate_passed: true,
     gate: null,
+    economics: null,
     ...over,
   };
 }

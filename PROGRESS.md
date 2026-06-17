@@ -1281,6 +1281,35 @@ EIP-712 domain + API L2-auth (live submit on testnet); approval-workflow web UI 
 issue single-use TTL token); a Redis consumer/CLI to drive the pipeline from `edge:signals`;
 then AWS KMS signer + Gnosis Safe + capped mainnet canary behind `EDGE_EXEC_ENABLED` + sign-off.
 
+## Slice: Execution Phase 6a — propose→approve workflow + CLIs  ✅ done (2026-06-17)
+
+Makes the dry-run pipeline actually drivable and adds the human approval step — fully
+autonomous (no external creds, stays dry-run, manual per trade).
+
+- **`store.load_intent`** — rebuild a stored `Intent` by id so the approve step re-seals the SAME
+  intent (identical hash) without re-forming it (no new nonce).
+- **`orchestrator/deps.py`** — composition root: `build_limits`/`build_state` from settings
+  (hot-balance assumed at cap + empty rolling window are explicit dry-run stand-ins; per-trade /
+  hot / allowlist gates are live), `clob_exchange_address` from the allowlist.
+- **`orchestrator/workflow.py`** — two steps: `propose_signal` (form + persist + breakers → stops
+  at `pending_approval`, nothing signed) and `approve_and_sign` (mint a token bound to the stored
+  intent's exact hash, persist the approval **hash only**, sign, dry-run submit). Minting against
+  the persisted hash makes "approve cheap, swap expensive" impossible.
+- **CLIs** — `python -m app.orchestrator.run <signal.json>` (propose) and
+  `python -m app.orchestrator.approve <intent_id>` (approve + sign + dry-run submit).
+- **config** — `EDGE_EXEC_INTENT_TTL_S` (intent expiry). Audit rows now carry an explicit
+  timestamp so the trail orders deterministically.
+
+**Files:** new `executor/app/orchestrator/{deps,workflow,run,approve}.py`,
+`executor/tests/test_workflow.py`; modified `executor/app/db/store.py` (`load_intent`),
+`executor/app/config.py`, `executor/app/orchestrator/pipeline.py` (audit timestamps).
+**Verify:** `cd executor && uv run pytest -q` → 83 passed with `EDGE_EXEC_TEST_DATABASE_URL`
+(77 passed + 6 skipped offline), ruff clean.
+
+**Still external (Phases 5b/6-UI/7):** live Polymarket CLOB submit (order schema + API creds);
+approval web UI; Redis consumer driving the pipeline from `edge:signals`; AWS KMS + Gnosis Safe +
+capped mainnet canary behind `EDGE_EXEC_ENABLED` + human sign-off.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

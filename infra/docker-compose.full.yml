@@ -1,0 +1,109 @@
+# EdgeOracle — FULL stack (DB + Redis + quant API + pollers + web dashboard).
+# The base infra/docker-compose.yml runs only Postgres + Redis (for local dev against host
+# processes); THIS file builds and runs every service for an end-to-end deployment.
+#
+# Up:   docker compose -f infra/docker-compose.full.yml up -d --build
+# Down: docker compose -f infra/docker-compose.full.yml down   (add -v to wipe data)
+#
+# Secrets (EDGE_SENTRY_DSN, real DB creds, etc.) come from the environment / a secret manager,
+# never committed. The defaults below are the local dev credentials only.
+
+x-quant-env: &quant-env
+  EDGE_DATABASE_URL: postgresql+asyncpg://edge:edge@postgres:5432/edge
+  EDGE_REDIS_URL: redis://redis:6379
+  EDGE_LOG_JSON: "true"
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment:
+      POSTGRES_USER: edge
+      POSTGRES_PASSWORD: edge
+      POSTGRES_DB: edge
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edge -d edge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: apply Alembic migrations, then exit. Everything else waits on it.
+  migrate:
+    build: ../quant
+    environment: *quant-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  quant-api:
+    build: ../quant
+    environment: *quant-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Pollers — each a standalone CLI loop (see app/ingestion, app/signals, app/monitoring).
+  scanner:        # ingestion: quotes
+    build: ../quant
+    environment: *quant-env
+    command: ["python", "-m", "app.ingestion.scanner", "loop"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  signals:        # set-arb scanner
+    build: ../quant
+    environment: *quant-env
+    command: ["python", "-m", "app.signals.engine", "loop"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  price-signals:  # favourite-longshot + extreme-correction (A6)
+    build: ../quant
+    environment: *quant-env
+    command: ["python", "-m", "app.signals.price_engine", "loop"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  trades:         # trade-print ingestion (A1)
+    build: ../quant
+    environment: *quant-env
+    command: ["python", "-m", "app.ingestion.trades_engine", "loop"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  monitor:        # drawdown + calibration-drift alerts (with dedup, A7)
+    build: ../quant
+    environment: *quant-env
+    command: ["python", "-m", "app.monitoring.engine", "loop"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  web:
+    build: ../web
+    environment:
+      QUANT_API_URL: http://quant-api:8000
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3000:3000"
+    depends_on:
+      quant-api:
+        condition: service_healthy
+
+volumes:
+  pgdata:

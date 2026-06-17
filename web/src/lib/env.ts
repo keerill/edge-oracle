@@ -3,6 +3,9 @@
 // stays internal. The browser talks only to our own /api/* routes.
 
 export const QUANT_API_URL = process.env.QUANT_API_URL ?? "http://localhost:8000";
+// Shared secret the BFF sends as X-API-Key when quant has EDGE_API_KEY set. Server-only secret;
+// undefined in local dev (quant then runs open). Inject via env / a secret manager, never commit.
+export const QUANT_API_KEY = process.env.QUANT_API_KEY;
 
 // Redis the live-signal SSE route subscribes to. Server-only — the browser talks only to our
 // /api/stream endpoint, never to Redis directly. Must match the quant engine's EDGE_SIGNALS_CHANNEL.

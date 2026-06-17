@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quant:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_USER: edge
+          POSTGRES_PASSWORD: edge
+          POSTGRES_DB: edge
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U edge -d edge"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      EDGE_TEST_DATABASE_URL: postgresql+asyncpg://edge:edge@localhost:5432/edge_test
+    defaults:
+      run:
+        working-directory: quant
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Create test database
+        run: PGPASSWORD=edge psql -h localhost -U edge -d edge -c "CREATE DATABASE edge_test;"
+      - run: uv sync --frozen
+      - name: Apply migrations
+        run: EDGE_DATABASE_URL=postgresql+asyncpg://edge:edge@localhost:5432/edge_test uv run alembic upgrade head
+      - name: Tests (incl. DB-gated)
+        run: uv run pytest -q
+
+  executor:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: edge
+          POSTGRES_PASSWORD: edge
+          POSTGRES_DB: edge
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U edge -d edge"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      EDGE_EXEC_TEST_DATABASE_URL: postgresql+asyncpg://edge:edge@localhost:5432/edge_exec_test
+    defaults:
+      run:
+        working-directory: executor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Create test database
+        run: PGPASSWORD=edge psql -h localhost -U edge -d edge -c "CREATE DATABASE edge_exec_test;"
+      - run: uv sync --frozen
+      - name: Tests (incl. DB-gated)
+        run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@9.15.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+      - name: Tests
+        run: pnpm test
+      - name: Build
+        run: pnpm build

@@ -3,7 +3,7 @@
 // well-typed values — money strings already coerced to numbers. Used by the BFF route handlers
 // (app/api/*) and server components; never imported into client code (it reads QUANT_API_URL).
 
-import { QUANT_API_URL } from "@/lib/env";
+import { QUANT_API_URL, QUANT_API_KEY } from "@/lib/env";
 import {
   AdvisedSignalListSchema,
   AdvisedSignalSchema,
@@ -31,7 +31,11 @@ async function fetchJson(path: string): Promise<unknown> {
   try {
     res = await fetch(`${QUANT_API_URL}${path}`, {
       cache: "no-store",
-      headers: { accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        // Shared secret between the BFF and quant (sent only when configured).
+        ...(QUANT_API_KEY ? { "X-API-Key": QUANT_API_KEY } : {}),
+      },
     });
   } catch (cause) {
     throw new QuantApiError(`quant service unreachable at ${path}`, 503);

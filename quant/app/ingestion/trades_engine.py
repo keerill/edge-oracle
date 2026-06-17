@@ -19,7 +19,7 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 @dataclass(frozen=True)

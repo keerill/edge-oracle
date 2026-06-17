@@ -10,7 +10,7 @@ worked-number sizing anchor, so the live endpoint and the pure ``advise`` math s
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -31,7 +31,7 @@ from app.models.signal import ArbSignal, ExtremeCorrectionSignal, FavouriteLongs
 TEST_DB = os.environ.get("EDGE_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(TEST_DB is None, reason="EDGE_TEST_DATABASE_URL not set")
 
-T = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+T = datetime(2026, 6, 16, 12, 0, tzinfo=UTC)
 
 
 def _reset_schema(sync_conn) -> None:
@@ -95,7 +95,7 @@ async def client():
             s,
             [
                 ArbSignal(
-                    time=datetime(2026, 6, 16, 12, 1, tzinfo=timezone.utc),
+                    time=datetime(2026, 6, 16, 12, 1, tzinfo=UTC),
                     market_id="m1", condition_id="c1", kind="long_set",
                     yes_price=Decimal("0.46"), no_price=Decimal("0.49"), set_size=Decimal("1"),
                     gross_edge=Decimal("0.05"), estimated_costs=Decimal("0.02"),
@@ -107,7 +107,7 @@ async def client():
             s,
             [
                 FavouriteLongshotSignal(
-                    time=datetime(2026, 6, 16, 12, 2, tzinfo=timezone.utc),
+                    time=datetime(2026, 6, 16, 12, 2, tzinfo=UTC),
                     market_id="m1", condition_id="c1", kind="buy_no",
                     price=Decimal("0.10"), edge_score=Decimal("0.5"),
                 )

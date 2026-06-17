@@ -7,7 +7,7 @@ and the injected capture time. The pure arb math is covered in test_arb.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -18,7 +18,7 @@ from app.models.market import Market
 from app.polymarket.schemas import RawOrderBook
 from app.signals import engine
 
-AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
 
 
 # --- fakes --------------------------------------------------------------------

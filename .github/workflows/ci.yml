@@ -38,10 +38,12 @@ jobs:
       - name: Create test database
         run: PGPASSWORD=edge psql -h localhost -U edge -d edge -c "CREATE DATABASE edge_test;"
       - run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check app tests
       - name: Apply migrations
         run: EDGE_DATABASE_URL=postgresql+asyncpg://edge:edge@localhost:5432/edge_test uv run alembic upgrade head
-      - name: Tests (incl. DB-gated)
-        run: uv run pytest -q
+      - name: Tests + coverage (incl. DB-gated)
+        run: uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=80
 
   executor:
     runs-on: ubuntu-latest
@@ -69,8 +71,10 @@ jobs:
       - name: Create test database
         run: PGPASSWORD=edge psql -h localhost -U edge -d edge -c "CREATE DATABASE edge_exec_test;"
       - run: uv sync --frozen
-      - name: Tests (incl. DB-gated)
-        run: uv run pytest -q
+      - name: Lint
+        run: uv run ruff check app tests
+      - name: Tests + coverage (incl. DB-gated)
+        run: uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=80
 
   web:
     runs-on: ubuntu-latest
@@ -91,3 +95,7 @@ jobs:
         run: pnpm test
       - name: Build
         run: pnpm build
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+      - name: E2E (smoke)
+        run: pnpm e2e

@@ -7,7 +7,7 @@ the token filter, and the half-open [start, end) window — mirroring the quotes
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -48,8 +48,8 @@ async def sessionmaker():
 
 
 async def test_trades_roundtrip_exact_decimals_and_order(sessionmaker):
-    t1 = datetime(2026, 6, 17, 7, 0, 0, tzinfo=timezone.utc)
-    t2 = datetime(2026, 6, 17, 7, 5, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 6, 17, 7, 0, 0, tzinfo=UTC)
+    t2 = datetime(2026, 6, 17, 7, 5, 0, tzinfo=UTC)
     async with sessionmaker() as s:
         # insert out of order; load must come back time-ordered
         n = await store.insert_trades(s, [_trade(t=t2, tid="0x2"), _trade(t=t1, tid="0x1")])
@@ -65,9 +65,9 @@ async def test_trades_roundtrip_exact_decimals_and_order(sessionmaker):
 
 
 async def test_load_trades_token_filter_and_window(sessionmaker):
-    t1 = datetime(2026, 6, 17, 7, 0, 0, tzinfo=timezone.utc)
-    t2 = datetime(2026, 6, 17, 7, 5, 0, tzinfo=timezone.utc)
-    t3 = datetime(2026, 6, 17, 7, 10, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 6, 17, 7, 0, 0, tzinfo=UTC)
+    t2 = datetime(2026, 6, 17, 7, 5, 0, tzinfo=UTC)
+    t3 = datetime(2026, 6, 17, 7, 10, 0, tzinfo=UTC)
     async with sessionmaker() as s:
         await store.insert_trades(s, [
             _trade(t=t1, token="111", tid="a"),

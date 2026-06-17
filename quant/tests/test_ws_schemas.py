@@ -5,7 +5,7 @@ wire contract for the published signal.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.models.advisor import AdvisedSignal
@@ -57,7 +57,7 @@ def test_published_signal_serializes_decimals_as_strings():
     # The SSE payload must be byte-for-byte a /signals row: Decimal -> JSON string (no float).
     advised = AdvisedSignal(
         id="set_arb:m1",
-        time=datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc),
+        time=datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC),
         market_id="m1",
         condition_id="c1",
         market_question="Q?",

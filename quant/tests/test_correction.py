@@ -7,14 +7,14 @@ the most-extreme clamp (0.0/1.0), and out-of-range guards. ``fair_value`` is exa
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
 from app.math.correction import CorrectionParams, evaluate_extreme_correction
 
-AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
 P = CorrectionParams()
 Q6 = Decimal("0.000001")
 

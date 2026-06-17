@@ -9,16 +9,16 @@ is skipped without killing the loop.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
+from app.config import Settings
 from app.models.advisor import AdvisedSignal
 from app.models.market import Market
 from app.streaming.book_state import BookStore
 from app.streaming.engine import arb_params, run_stream
-from app.config import Settings
 
-AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
 
 
 async def _feed(frames: list[dict]) -> AsyncIterator[dict]:

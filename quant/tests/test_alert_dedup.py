@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.models.alert import Alert
 from app.observability.alert_dedup import AlertDeduper
 
-T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 
 
 def _alert(kind="drawdown_breach", value="0.3") -> Alert:

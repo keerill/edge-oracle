@@ -7,7 +7,7 @@ The pure transform is covered in test_trades_transform.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -117,10 +117,10 @@ async def test_since_cursor_dedups_across_cycles(monkeypatch, capture_trades):
 
     data1 = FakeData({"cA": [t_old]})
     await trades_engine.run_trades_scan_once(data1, fake_sessionmaker, Settings(), since=since)
-    assert since["A-yes"] == datetime.fromtimestamp(100, tz=timezone.utc)
+    assert since["A-yes"] == datetime.fromtimestamp(100, tz=UTC)
 
     # next cycle re-returns the old trade plus a newer one; only the newer is inserted
     data2 = FakeData({"cA": [t_old, t_new]})
     await trades_engine.run_trades_scan_once(data2, fake_sessionmaker, Settings(), since=since)
     assert [t.trade_id for t in capture_trades["trades"]] == ["t1", "t2"]
-    assert since["A-yes"] == datetime.fromtimestamp(200, tz=timezone.utc)
+    assert since["A-yes"] == datetime.fromtimestamp(200, tz=UTC)

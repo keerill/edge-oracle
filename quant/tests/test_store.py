@@ -9,7 +9,7 @@ the critical NUMERIC<->Decimal money guard.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -85,7 +85,7 @@ async def test_upsert_markets_is_idempotent(sessionmaker):
 
 async def test_insert_quotes_decimal_roundtrip(sessionmaker):
     quote = QuoteSnapshot(
-        time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+        time=datetime(2026, 6, 16, 12, 0, tzinfo=UTC),
         token_id="111",
         market_id="m1",
         best_bid=Decimal("0.51"),
@@ -113,7 +113,7 @@ async def test_insert_quotes_decimal_roundtrip(sessionmaker):
 async def test_load_quotes_is_time_ordered_and_window_filtered(sessionmaker):
     def _q(token_id, hour, mid):
         return QuoteSnapshot(
-            time=datetime(2026, 6, 16, hour, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 6, 16, hour, 0, tzinfo=UTC),
             token_id=token_id,
             market_id="m1",
             best_bid=Decimal("0.50"),
@@ -136,8 +136,8 @@ async def test_load_quotes_is_time_ordered_and_window_filtered(sessionmaker):
         only_111 = await store.load_quotes(s, token_ids=["111"])
         windowed = await store.load_quotes(
             s,
-            start=datetime(2026, 6, 16, 12, 30, tzinfo=timezone.utc),
-            end=datetime(2026, 6, 16, 14, 0, tzinfo=timezone.utc),
+            start=datetime(2026, 6, 16, 12, 30, tzinfo=UTC),
+            end=datetime(2026, 6, 16, 14, 0, tzinfo=UTC),
         )
 
     assert [q.midpoint for q in all_q] == [Decimal("0.60"), Decimal("0.30"), Decimal("0.70")]
@@ -149,7 +149,7 @@ async def test_load_quotes_is_time_ordered_and_window_filtered(sessionmaker):
 
 async def test_insert_quotes_allows_null_sides(sessionmaker):
     quote = QuoteSnapshot(
-        time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+        time=datetime(2026, 6, 16, 12, 0, tzinfo=UTC),
         token_id="111",
         market_id="m1",
         best_bid=Decimal("0.51"),
@@ -189,7 +189,7 @@ async def test_set_untracked(sessionmaker):
 
 async def test_insert_signals_decimal_roundtrip(sessionmaker):
     sig = ArbSignal(
-        time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+        time=datetime(2026, 6, 16, 12, 0, tzinfo=UTC),
         market_id="m1",
         condition_id="c1",
         kind="long_set",
@@ -226,7 +226,7 @@ async def test_insert_signals_decimal_roundtrip(sessionmaker):
 
 async def test_insert_favourite_longshot_signal_roundtrip(sessionmaker):
     sig = FavouriteLongshotSignal(
-        time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+        time=datetime(2026, 6, 16, 12, 0, tzinfo=UTC),
         market_id="m1",
         condition_id="c1",
         kind="buy_no",
@@ -255,7 +255,7 @@ async def test_insert_favourite_longshot_signal_roundtrip(sessionmaker):
 
 async def test_insert_extreme_correction_signal_roundtrip(sessionmaker):
     sig = ExtremeCorrectionSignal(
-        time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+        time=datetime(2026, 6, 16, 12, 0, tzinfo=UTC),
         market_id="m1",
         condition_id="c1",
         price=Decimal("0.04"),
@@ -301,7 +301,7 @@ async def test_load_tracked_markets_returns_only_tracked(sessionmaker):
 
 def _calib(*, estimate, price, outcome, strategy, t_min) -> CalibrationRecord:
     return CalibrationRecord(
-        time=datetime(2026, 6, 16, 12, t_min, tzinfo=timezone.utc),
+        time=datetime(2026, 6, 16, 12, t_min, tzinfo=UTC),
         market_id="m1",
         condition_id="c1",
         strategy=strategy,

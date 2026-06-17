@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-
-import pytest
 
 from app.api.signals import effective_kelly_frac
 from app.config import Settings
@@ -15,7 +13,7 @@ from app.models.market import Market
 from app.models.signal import ExtremeCorrectionSignal
 from app.polymarket.schemas import RawGammaMarket
 
-AT = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 
 
 def _market(mid, cid) -> Market:

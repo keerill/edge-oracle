@@ -10,14 +10,14 @@ Threat-model notes encoded here:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.breakers.checks import BreakerLimits, BreakerState, evaluate
 from app.models.intent import Intent
 
-T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
-EXP = datetime(2026, 6, 17, 12, 5, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
+EXP = datetime(2026, 6, 17, 12, 5, 0, tzinfo=UTC)
 
 
 def _intent(**over) -> Intent:

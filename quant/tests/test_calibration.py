@@ -7,7 +7,7 @@ constant. No ``pytest.approx`` / ``math.isclose`` — same rule as the rest of t
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -24,7 +24,7 @@ from app.math.calibration import (
 from app.models.calibration import CalibrationRecord, CalibrationTimePoint, KellyAdjustment
 
 Q6 = Decimal("0.000001")
-_T = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _rec(estimate: str, outcome: int, strategy: str = "s", m: str = "0.5") -> CalibrationRecord:
@@ -43,7 +43,7 @@ def _rec(estimate: str, outcome: int, strategy: str = "s", m: str = "0.5") -> Ca
 def _rec_at(day: int, estimate: str, outcome: int, strategy: str = "s") -> CalibrationRecord:
     """A calibration record stamped on ``2026-01-<day>`` (for the cumulative timeline)."""
     return CalibrationRecord(
-        time=datetime(2026, 1, day, tzinfo=timezone.utc),
+        time=datetime(2026, 1, day, tzinfo=UTC),
         market_id="m1",
         condition_id="c1",
         strategy=strategy,

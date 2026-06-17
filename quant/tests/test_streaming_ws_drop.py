@@ -19,7 +19,7 @@ class _Dropper:
     def __init__(self, exc: Exception) -> None:
         self.exc = exc
 
-    def __call__(self, url: str) -> "_Dropper":
+    def __call__(self, url: str) -> _Dropper:
         return self
 
     async def __aenter__(self) -> object:

@@ -8,7 +8,7 @@ we can assert on them without Redis. The drift numbers mirror ``seed_demo`` (gap
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.config import Settings
@@ -17,7 +17,7 @@ from app.models.backtest import BacktestResult
 from app.models.calibration import CalibrationRecord
 from app.monitoring.engine import run_monitor_once
 
-AT = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, tzinfo=UTC)
 
 
 class _FakeRedis:

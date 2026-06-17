@@ -7,14 +7,14 @@ gaps, the true extremes, and out-of-range guards. ``edge_score`` is exact ``Deci
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
 from app.math.longshot import LongshotParams, evaluate_favourite_longshot
 
-AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
 P = LongshotParams()
 Q6 = Decimal("0.000001")
 

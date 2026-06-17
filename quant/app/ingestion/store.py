@@ -22,13 +22,13 @@ from app.db.tables import trades as trades_table
 from app.models.calibration import CalibrationRecord
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
-from app.models.trade import Trade
 from app.models.signal import (
     ArbSignal,
     ExtremeCorrectionSignal,
     FavouriteLongshotSignal,
     Signal,
 )
+from app.models.trade import Trade
 
 # Market columns updated on conflict (everything except the PK and created_at).
 _MARKET_UPDATE_COLS = (

@@ -8,7 +8,7 @@ selection, and universe ranking/selection.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -24,7 +24,7 @@ from app.ingestion.transform import (
 from app.models.book import BookLevel, OrderBook
 from app.polymarket.schemas import RawGammaMarket, RawOrderBook
 
-AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
 
 
 # --- parse_stringified_str_array ---------------------------------------------

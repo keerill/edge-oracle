@@ -20,7 +20,7 @@ import logging
 import os
 import sys
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -46,7 +46,7 @@ CalibrationLoader = Callable[[], Awaitable[list[CalibrationRecord]]]
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 async def run_monitor_once(

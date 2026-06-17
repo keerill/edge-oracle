@@ -7,7 +7,7 @@ Decimal->string wire contract as ``publish_signal``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from prometheus_client import REGISTRY
@@ -15,7 +15,7 @@ from prometheus_client import REGISTRY
 from app.models.alert import Alert
 from app.observability.alert_bus import publish_alert
 
-AT = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, tzinfo=UTC)
 
 
 class _FakeRedis:

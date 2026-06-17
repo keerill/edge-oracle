@@ -8,7 +8,7 @@ and that only a token HASH is persisted (never a raw token).
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -23,8 +23,8 @@ from app.models.intent import Intent, compute_intent_hash
 TEST_DB = os.environ.get("EDGE_EXEC_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(TEST_DB is None, reason="EDGE_EXEC_TEST_DATABASE_URL not set")
 
-T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
-EXP = datetime(2026, 6, 17, 12, 5, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
+EXP = datetime(2026, 6, 17, 12, 5, 0, tzinfo=UTC)
 
 
 def _intent(**over) -> Intent:

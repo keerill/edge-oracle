@@ -10,7 +10,7 @@ estimate the gate/sizing consume (CLAUDE.md: size on p, gate on the lower bound)
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -21,7 +21,7 @@ from app.math.fair_value import (
     estimate_fair_value,
 )
 
-T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 
 
 def _obs(seconds: int, midpoint: str) -> FairValueObservation:

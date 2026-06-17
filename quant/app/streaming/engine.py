@@ -19,10 +19,11 @@ import json
 import logging
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from app.advisor.view import advise
 from app.config import Settings, get_settings
 from app.db.engine import get_sessionmaker
 from app.ingestion import store as store_mod
@@ -41,7 +42,6 @@ from app.observability.metrics import (
 from app.observability.sentry import init_sentry
 from app.streaming.book_state import BookStore
 from app.streaming.redis_bus import publish_signal
-from app.advisor.view import advise
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ Publish = Callable[[AdvisedSignal], Awaitable[None]]
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def arb_params(settings: Settings) -> ArbParams:

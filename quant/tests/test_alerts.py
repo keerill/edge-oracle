@@ -11,7 +11,7 @@ verification path actually fires.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.math.backtest import max_drawdown
@@ -24,7 +24,7 @@ from app.observability.alerts import (
     evaluate_ws_drop,
 )
 
-AT = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, tzinfo=UTC)
 
 
 # --- helpers -----------------------------------------------------------------

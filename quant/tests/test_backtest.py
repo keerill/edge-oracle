@@ -10,7 +10,7 @@ Monte-Carlo Gaussian perturbation, and it only decides a 0/1 outcome, never a do
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -31,7 +31,7 @@ from app.models.backtest import BacktestParams, BetCandidate, ClosedBet
 Q2 = Decimal("0.01")
 Q6 = Decimal("0.000001")
 
-T0 = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 1, 0, 0, tzinfo=UTC)
 
 
 def _t(hours: int) -> datetime:

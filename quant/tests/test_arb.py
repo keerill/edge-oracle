@@ -8,7 +8,7 @@ no-arb / insufficient-depth rejections.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.math.arb import (
@@ -21,7 +21,7 @@ from app.math.arb import (
 )
 from app.models.book import BookLevel, OrderBook
 
-AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
 
 
 def _levels(*pairs: tuple[str, str]) -> tuple[BookLevel, ...]:

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.models.book import BookLevel, OrderBook
@@ -133,8 +133,8 @@ def _parse_book_timestamp(ts: str | int | None) -> datetime | None:
         return None
     # Unix seconds now ~1.7e9 (10 digits); unix ms ~1.7e12 (13 digits).
     if n > 10_000_000_000:
-        return datetime.fromtimestamp(n / 1000, tz=timezone.utc)
-    return datetime.fromtimestamp(n, tz=timezone.utc)
+        return datetime.fromtimestamp(n / 1000, tz=UTC)
+    return datetime.fromtimestamp(n, tz=UTC)
 
 
 def orderbook_from_raw(raw: RawOrderBook, token_id: str) -> OrderBook:

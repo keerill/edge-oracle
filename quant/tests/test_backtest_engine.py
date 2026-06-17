@@ -8,7 +8,7 @@ offline tests. ``run_backtest_once`` is exercised against a throwaway DB (skippe
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -23,9 +23,9 @@ from app.models.backtest import MarketResolution
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 
-T1 = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
-T2 = datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc)
-RESOLVE = datetime(2026, 6, 5, 0, 0, tzinfo=timezone.utc)
+T1 = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+T2 = datetime(2026, 6, 1, 13, 0, tzinfo=UTC)
+RESOLVE = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
 
 
 def _market(*, market_id="m1", condition_id="c1", yes="111", no="222", category="politics") -> Market:

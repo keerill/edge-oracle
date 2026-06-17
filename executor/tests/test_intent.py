@@ -9,7 +9,7 @@ while a doctored one does not.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -20,8 +20,8 @@ from app.models.intent import (
     compute_intent_hash,
 )
 
-T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
-EXP = datetime(2026, 6, 17, 12, 5, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
+EXP = datetime(2026, 6, 17, 12, 5, 0, tzinfo=UTC)
 
 
 def _intent(**over) -> Intent:
@@ -98,5 +98,7 @@ def test_envelope_with_tampered_hash_fails_verify():
 
 
 def test_intent_is_frozen():
-    with pytest.raises(Exception):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         _intent().size = Decimal("1")  # type: ignore[misc]

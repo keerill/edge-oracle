@@ -29,3 +29,7 @@ yarn-error.log*
 
 # testing
 /coverage
+
+# e2e
+test-results/
+playwright-report/

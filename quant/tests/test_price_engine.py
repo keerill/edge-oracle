@@ -7,7 +7,7 @@ The pure band/nudge math is covered in test_longshot.py / test_correction.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.config import Settings
@@ -16,7 +16,7 @@ from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 from app.signals import price_engine
 
-AT = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 
 
 def _market(mid) -> Market:

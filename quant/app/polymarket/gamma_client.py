@@ -8,11 +8,10 @@ not allowed to fail discovery of the rest.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 import httpx
 from pydantic import ValidationError
-
-from collections.abc import Sequence
 
 from app.config import Settings
 from app.polymarket.http import request_json

@@ -7,14 +7,14 @@ serves. The directional numbers reuse the proven ``position_size`` anchors from
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.advisor.view import _confidence, advise
 from app.models.quote import QuoteSnapshot
 from app.models.signal import ArbSignal, ExtremeCorrectionSignal, FavouriteLongshotSignal
 
-T = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+T = datetime(2026, 6, 16, 12, 0, tzinfo=UTC)
 
 
 def _quote(token_id: str, mid: str, spread: str) -> QuoteSnapshot:

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.ingestion.resolution import calibration_from_resolution, resolved_outcome
 from app.models.signal import ExtremeCorrectionSignal
 
-AT = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 
 
 def test_yes_won_is_outcome_1():

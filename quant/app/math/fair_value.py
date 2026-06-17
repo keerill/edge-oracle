@@ -86,9 +86,9 @@ def estimate_fair_value(
         weights = [ONE] * len(obs)
         total = Decimal(len(obs))
 
-    p_hat = sum((w * o.midpoint for w, o in zip(weights, obs)), ZERO) / total
+    p_hat = sum((w * o.midpoint for w, o in zip(weights, obs, strict=True)), ZERO) / total
     variance = sum(
-        (w * (o.midpoint - p_hat) * (o.midpoint - p_hat) for w, o in zip(weights, obs)), ZERO
+        (w * (o.midpoint - p_hat) * (o.midpoint - p_hat) for w, o in zip(weights, obs, strict=True)), ZERO
     ) / total
     sigma = _sqrt(variance)
     p_lo = p_hat - params.k * sigma

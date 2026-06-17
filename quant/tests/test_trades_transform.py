@@ -6,7 +6,7 @@ side/trade_id carried through, and the caller-supplied market_id (token->market 
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.ingestion.trades_transform import trade_from_raw
@@ -38,7 +38,7 @@ def test_trade_from_raw_coerces_exact_decimals_and_time():
     # exact wire literal -> Decimal, no float rounding
     assert t.price == Decimal("0.8099999954639995")
     assert t.size == Decimal("30.864194")
-    assert t.time == datetime(2026, 6, 17, 7, 38, 13, tzinfo=timezone.utc)
+    assert t.time == datetime(2026, 6, 17, 7, 38, 13, tzinfo=UTC)
 
 
 def test_price_is_not_float_mediated():

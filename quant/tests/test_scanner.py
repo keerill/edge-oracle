@@ -8,7 +8,7 @@ two-cadence discovery timing.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -17,7 +17,7 @@ from app.config import Settings
 from app.ingestion import scanner, store, transform
 from app.polymarket.schemas import RawGammaMarket, RawOrderBook
 
-AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 6, 16, 12, 0, 0, tzinfo=UTC)
 
 
 # --- fakes --------------------------------------------------------------------

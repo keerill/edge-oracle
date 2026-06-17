@@ -25,8 +25,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -40,7 +39,7 @@ from app.models.market import Market
 from app.models.quote import QuoteSnapshot
 
 ZERO = Decimal(0)
-T0 = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
 RESOLUTIONS_PATH = Path(__file__).resolve().parent.parent / "demo_resolutions.json"
 
 # Demo backtest knobs: low margin + zero slippage/gas so the extreme-correction longshots clear
@@ -130,7 +129,7 @@ def build_calibration() -> list[CalibrationRecord]:
             day = (i % 6) + 1  # spread across six days so the timeline has movement
             records.append(
                 CalibrationRecord(
-                    time=datetime(2026, 5, day, 12, 0, tzinfo=timezone.utc),
+                    time=datetime(2026, 5, day, 12, 0, tzinfo=UTC),
                     market_id=f"demo-cal-{i}",
                     condition_id=f"demo-cal-c{i}",
                     strategy=strategy,

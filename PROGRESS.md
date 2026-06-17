@@ -1104,6 +1104,46 @@ Roadmap Трек B (эксплуатация): контейнеризация, C
 - **Трек C (исполнение, Фазы 4–7)**: реальные AWS KMS / Polygon-Amoy ключ / private-relay +
   лимиты капитала — внешние доступы и необратимые решения; автономно не делается.
 
+## Slice: Quality tooling — ruff lint + coverage + e2e (Трек B5)  ✅ done (2026-06-17)
+
+Roadmap Трек B5 (dev-deps согласованы пользователем): линт, покрытие, e2e.
+
+### What's done
+- **Ruff (lint-only)** на quant + executor: `[tool.ruff.lint]` select E/W/F/I/UP/B/C4, ignore
+  E501/C408/B008. **Формат НЕ навязываем** (код в осознанном компактном hand-стиле — CLAUDE.md
+  «match surrounding»). Авто-фикс применён (UTC-alias, сортировка импортов). Ruff **нашёл реальный
+  латентный баг**: `app/math/arb.py` использовал `datetime` в аннотациях без импорта (работало лишь
+  через `from __future__ import annotations`) — импорт добавлен; `fair_value` zip'ы → `strict=True`.
+- **Coverage** (pytest-cov): quant **84%**, порог CI `--cov-fail-under=80`.
+- **Playwright e2e** (web): `@playwright/test` + `playwright.config.ts` (webServer = `next` бинарь
+  напрямую, минуя pnpm-лаунчер — система pnpm11 ломается на Node20) + `e2e/dashboard.spec.ts` (shell
+  рендерится на `/` и `/signals` без backend — устойчиво к no-Redis/no-quant). 
+- **CI** (`.github/workflows/ci.yml`): + lint + coverage в quant/executor джобах; новый шаг e2e
+  (build → playwright install chromium → e2e) в web-джобе.
+
+### Verified
+- `cd quant && uv run ruff check app tests` → **All checks passed**; `… pytest -q --cov` → **319
+  passed, 84%**. `cd executor && … ruff check` → passed; `… pytest -q` → **37 passed**. 
+- **Playwright e2e (реальный Chromium)**: `… playwright test` → **3 passed (2.9s)** — shell на
+  home + signals рендерится end-to-end (alerts-SSE ошибки = ожидаемое no-Redis состояние, страницы
+  его терпят by design).
+
+## Трек B (production-эксплуатация) — ЗАВЕРШЁН (B1–B5)
+B1 Docker+compose · B2 CI · B3 auth/CORS/rate-limit · B4 secrets-policy · B5 lint/coverage/e2e.
+
+## Коммиты этой сессии (ветка feat/advisor-loop-and-ops)
+`feat(executor): pure-core` · `feat(quant): advisor loop A1–A7 + auth` · `feat(ops): docker/CI/auth`
+· `docs(progress)` · `chore(quality): ruff/coverage/e2e`. (Track A 245→312 тестов; +security 319;
+executor 37; web 79 unit + 3 e2e.)
+
+## Осталось — Трек C (исполнение, Фазы 4–7)
+Решение пользователя: строить **оффлайн Phase 4 против локального test-ключа** (без реального
+KMS/mainnet). Phase 4 — это **signer-сервис** (центральный по threat-model: default-deny политика,
+intent-hash re-verify, EIP-712/1559 digest, (r,s,v) реконструкция). Крипто-слой требует eth-депов
+(`eth-account`) и аккуратного round-trip тестирования recovered-address — это его собственный
+тщательный слайс (security-critical, не торопить). Реальный KMS/relay/mainnet (C0,C5–C7) + лимиты
+капитала — внешние доступы/необратимые решения.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

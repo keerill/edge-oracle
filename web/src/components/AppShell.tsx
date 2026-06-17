@@ -8,6 +8,7 @@ import styles from "./AppShell.module.scss";
 const NAV: { label: string; href: string | null }[] = [
   { label: "Signals", href: "/signals" },
   { label: "Portfolio", href: "/portfolio" },
+  { label: "Approvals", href: "/approvals" },
   { label: "Backtest", href: "/backtest" },
   { label: "Calibration", href: "/calibration" },
   { label: "Settings", href: "/settings" },

@@ -55,6 +55,14 @@ class LocalSigner:
             signature="0x" + signed.signature.hex().removeprefix("0x"),
         )
 
+    def sign_eip712(self, typed_data: dict) -> str:
+        """Sign arbitrary EIP-712 typed data (``encode_typed_data`` kwargs) and return the 0x-hex
+        65-byte signature. Used for the Polymarket CLOB *order* (a different struct/domain than the
+        intent envelope); the key never leaves this object."""
+        signable = encode_typed_data(**typed_data)
+        signed = self._account.sign_message(signable)
+        return "0x" + signed.signature.hex().removeprefix("0x")
+
 
 def recover_signer(envelope: IntentEnvelope, signature: str) -> str:
     """Recover the signer address from the intent's EIP-712 message + signature."""

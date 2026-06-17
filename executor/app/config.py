@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     relay_url: str = ""  # Flashbots-style private relay (Phase 5)
     signer_url: str = ""  # internal signer service (Phase 4)
     kms_key_id: str = ""  # non-secret AWS KMS handle (production signer)
+
+    # --- CLOB order (Phase 5b — built + tested vs mock HTTP; not wired live until creds) ------
+    # The EIP-712 verifyingContract for order signing. Default = Polymarket CTF Exchange (Polygon).
+    # NegRisk markets use a DIFFERENT exchange + domain name — set per market before going live.
+    exchange_address: str = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+    exchange_domain_name: str = "Polymarket CTF Exchange"  # NegRisk: "Polymarket Neg Risk CTF Exchange"
+    exchange_domain_version: str = "1"
+    fee_rate_bps: int = 0  # taker fee in bps embedded in the order
+    signature_type: int = 0  # 0=EOA, 1=POLY_PROXY, 2=POLY_GNOSIS_SAFE
+    # L2 API credentials (derived from the funded wallet via Polymarket's /auth). SECRETS — inject
+    # via .env / a secret manager, NEVER commit. Blank until the operator supplies them.
+    clob_api_key: str = ""
+    clob_api_secret: str = ""  # base64url; the HMAC key for L2 request signatures
+    clob_api_passphrase: str = ""
     # TESTNET-ONLY local signing key (Phase 4 offline). A SECRET — inject via a secret manager,
     # NEVER commit, and NEVER set on mainnet (production uses kms_key_id, key never exported).
     signer_private_key: str | None = None

@@ -27,8 +27,25 @@ function sig(over: Partial<AdvisedSignal>): AdvisedSignal {
   };
 }
 
+const ECON = {
+  ask: 0.44,
+  stake_usd: 50,
+  profit_if_win_usd: 63.64,
+  profit_if_loss_usd: -50,
+  ev_usd: 18.75,
+  ev_usd_conservative: 6.82,
+  prob_of_loss: 0.45,
+  locked_profit_usd: null,
+};
+
 const SIGNALS: AdvisedSignal[] = [
-  sig({ id: "a", market_question: "Alpha", net_edge: 0.06, recommended_size_usd: 50 }),
+  sig({
+    id: "a",
+    market_question: "Alpha",
+    net_edge: 0.06,
+    recommended_size_usd: 50,
+    economics: ECON,
+  }),
   sig({
     id: "b",
     market_question: "Bravo",
@@ -73,7 +90,8 @@ describe("SignalsTable", () => {
     expect(screen.getByText("BUY YES")).toBeInTheDocument();
     expect(screen.getByText("Extreme correction")).toBeInTheDocument();
     expect(screen.getByText("$50.00")).toBeInTheDocument(); // recommended size (USD)
-    expect(screen.getByText("0.55")).toBeInTheDocument(); // your p
+    expect(screen.getByText("+$18.75")).toBeInTheDocument(); // expected $ (EV)
+    expect(screen.getByText("45.0%")).toBeInTheDocument(); // loss risk
     // Links point at the dedicated detail route.
     expect(screen.getByRole("link", { name: /Alpha/ })).toHaveAttribute("href", "/signals/a");
   });

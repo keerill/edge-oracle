@@ -24,6 +24,25 @@ export function fmtUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+/** Signed dollars -> "+$18.75" / "-$50.00" (for EV / P&L that can be negative). */
+export function fmtUsdSigned(value: number): string {
+  const sign = value >= 0 ? "+" : "-";
+  return `${sign}$${Math.abs(value).toFixed(2)}`;
+}
+
+/** The expected-$ headline for a row: directional EV, or the arb's locked (risk-free) profit. */
+export function advisedEv(signal: AdvisedSignal): number | null {
+  const e = signal.economics;
+  if (!e) return null;
+  if (e.ev_usd !== null) return e.ev_usd;
+  return e.locked_profit_usd;
+}
+
+/** Probability the bet loses (directional); 0 for risk-free arb; null when unknown. */
+export function advisedLossProb(signal: AdvisedSignal): number | null {
+  return signal.economics?.prob_of_loss ?? null;
+}
+
 const STRATEGY_LABELS: Record<Strategy, string> = {
   extreme_correction: "Extreme correction",
   favourite_longshot: "Favourite–longshot",

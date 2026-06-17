@@ -10,6 +10,7 @@ import {
   fmtPct,
   fmtPrice,
   fmtUsd,
+  fmtUsdSigned,
   sideLabel,
   signalStatus,
   strategyLabel,
@@ -71,6 +72,63 @@ export default async function SignalDetailPage({
           accent
         />
       </section>
+
+      {signal.economics ? (
+        <GlassCard
+          strong
+          glow={signal.strategy === "set_arb" ? "green" : "violet"}
+          className={styles.gateCard}
+        >
+          <h2 className={styles.cardTitle}>Earnings &amp; risk (your bankroll)</h2>
+          {signal.strategy === "set_arb" ? (
+            <>
+              <p className={styles.gateLede}>
+                Risk-free: a complete set redeems for $1.00, so this profit is locked regardless of
+                how the market resolves.
+              </p>
+              <dl className={styles.breakdown}>
+                <Row
+                  label="Locked profit (per set detected)"
+                  value={fmtUsd(signal.economics.locked_profit_usd ?? 0)}
+                  strong
+                />
+                <Row label="Probability of loss" value="0% — risk-free" />
+              </dl>
+            </>
+          ) : (
+            <>
+              <p className={styles.gateLede}>
+                What this bet makes or loses at your recommended stake. EV is positive on average,
+                but a single bet can still land on the loss leg — sizing keeps that survivable.
+              </p>
+              <dl className={styles.breakdown}>
+                <Row label="Recommended stake" value={fmtUsd(signal.economics.stake_usd ?? 0)} />
+                <Row
+                  label="Profit if it wins"
+                  value={fmtUsdSigned(signal.economics.profit_if_win_usd ?? 0)}
+                />
+                <Row
+                  label="Loss if it loses"
+                  value={fmtUsdSigned(signal.economics.profit_if_loss_usd ?? 0)}
+                />
+                <Row
+                  label="Expected value (at your p)"
+                  value={fmtUsdSigned(signal.economics.ev_usd ?? 0)}
+                  strong
+                />
+                <Row
+                  label="Expected value (conservative, p_lo)"
+                  value={fmtUsdSigned(signal.economics.ev_usd_conservative ?? 0)}
+                />
+                <Row
+                  label="Probability of loss"
+                  value={fmtPct(signal.economics.prob_of_loss ?? 0)}
+                />
+              </dl>
+            </>
+          )}
+        </GlassCard>
+      ) : null}
 
       <GlassCard strong className={styles.meterCard}>
         <h2 className={styles.cardTitle}>Net edge after costs</h2>

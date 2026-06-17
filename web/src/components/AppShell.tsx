@@ -4,12 +4,13 @@ import Badge from "./Badge";
 import ThemeToggle from "./ThemeToggle";
 import styles from "./AppShell.module.scss";
 
-// `href: null` = not yet routed (Markets lands in a later slice).
+// `href: null` = not yet routed.
 const NAV: { label: string; href: string | null }[] = [
   { label: "Signals", href: "/signals" },
-  { label: "Markets", href: null },
+  { label: "Portfolio", href: "/portfolio" },
   { label: "Backtest", href: "/backtest" },
   { label: "Calibration", href: "/calibration" },
+  { label: "Settings", href: "/settings" },
 ];
 
 /** Top bar + centered content frame. The persistent chrome around every page. */

@@ -1136,13 +1136,52 @@ B1 Docker+compose · B2 CI · B3 auth/CORS/rate-limit · B4 secrets-policy · B5
 · `docs(progress)` · `chore(quality): ruff/coverage/e2e`. (Track A 245→312 тестов; +security 319;
 executor 37; web 79 unit + 3 e2e.)
 
-## Осталось — Трек C (исполнение, Фазы 4–7)
-Решение пользователя: строить **оффлайн Phase 4 против локального test-ключа** (без реального
-KMS/mainnet). Phase 4 — это **signer-сервис** (центральный по threat-model: default-deny политика,
-intent-hash re-verify, EIP-712/1559 digest, (r,s,v) реконструкция). Крипто-слой требует eth-депов
-(`eth-account`) и аккуратного round-trip тестирования recovered-address — это его собственный
-тщательный слайс (security-critical, не торопить). Реальный KMS/relay/mainnet (C0,C5–C7) + лимиты
-капитала — внешние доступы/необратимые решения.
+## Slice: Execution Phase 4 (offline signer core) — policy + crypto + approval  ✅ done (2026-06-17)
+
+Трек C, Phase 4 против **локального testnet-ключа** (без реального KMS/mainnet). Центральный
+вывод threat-model: считать executor скомпрометированным — signer имеет СОБСТВЕННУЮ default-deny
+политику и подписывает только то, что прошло. Три слайса:
+
+### Signer policy (pure, no keys) — `app/signer/policy.py`
+`evaluate_policy(envelope, policy, now, approval_valid)` — re-verify `intent_hash`, chainId-пин,
+expiry, action-allowlist, contract-allowlist, per-tx notional + slippage cap, **exact (никогда
+infinite/zero) ERC-20 allowance** allowlisted-спендеру, approval-gate выше порога. **Default-deny**:
+всё нераспознанное запрещено; возвращает ВСЕ причины. 15 worked-example тестов.
+
+### Signer crypto (local key) — `app/signer/{eip712,crypto}.py`
+`LocalSigner` (eth-account; оффлайн-замена AWS KMS за тем же `address`/`sign` интерфейсом) подписывает
+**реальный EIP-712** месседж, связывающий `intent_hash` (SHA-256 над всем интентом) + on-chain
+границы (chainId/expiry/nonce). `recover_signer` round-trip'ит адрес. Ключ НИКОГДА не в выводе.
+9 тестов (round-trip recovered-address==signer, no-key-leak, different-intent→different-sig).
+
+### Approval token — `app/signer/approval.py`
+HMAC, связанный с ТОЧНЫМ `intent_hash` + TTL. Signer верифицирует сам: ниже порога — не нужен;
+выше — токен для ДРУГОГО интента не разблокирует этот (стоп approve-cheap-swap-expensive);
+expired/tampered/wrong-secret отклоняются. 6 тестов.
+
+### sign_intent (gated entrypoint) — `app/signer/service.py`
+Policy-ЗАТЕМ-sign: запрещённый/подделанный/выше-порога-без-токена интент → **НЕТ подписи**.
+
+### Verified
+- `cd executor && uv run pytest -q` → **67 passed** (52→67: +15 policy, +9 crypto, +6 approval).
+  Ruff clean. Известный Anvil test-ключ деривит ожидаемый адрес; EIP-712 sign→recover round-trip OK.
+- Депы: `eth-account` (runtime, для signer). Кноб `EDGE_EXEC_SIGNER_PRIVATE_KEY` — **testnet-only
+  секрет**, прод использует `kms_key_id` (ключ не экспортируется).
+
+### Осталось в Phase 4 / далее
+- **POST /sign HTTP-сервис** (тонкая deployable-обёртка над `sign_intent` + загрузка ключа/политики
+  из config) — плумбинг; ядро готово.
+- **Phase 5+ (relay/mainnet/KMS)** — внешние доступы/необратимые решения (ниже).
+
+## Осталось — Трек C (исполнение, Фазы 5–7)
+Phase 4 (signer security core: policy + EIP-712 crypto + approval, против локального test-ключа)
+**ЗАВЕРШЁН** (выше). Остаётся:
+- **POST /sign HTTP-сервис** — тонкая deployable-обёртка над `sign_intent` (грузит ключ/политику из
+  config); ядро готово.
+- **C0/C5–C7**: реальный приватный relay на Polygon + точные адреса контрактов Polymarket; AWS KMS
+  (замена локального ключа, sign-only, ключ не экспортируется); Gnosis Safe холодный сплит; testnet
+  E2E → capped mainnet-канарейка за `EDGE_EXEC_ENABLED` + лимиты капитала. **Внешние доступы и
+  необратимые денежные решения** — вне автономной части.
 
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the

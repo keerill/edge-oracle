@@ -22,6 +22,21 @@
   gap: var(--space-3);
 }
 
+.track {
+  align-self: flex-start;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--neon-violet);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  transition: color var(--dur-fast) var(--ease-out);
+
+  &:hover {
+    color: var(--neon-cyan);
+  }
+}
+
 .headTop {
   display: flex;
   align-items: center;

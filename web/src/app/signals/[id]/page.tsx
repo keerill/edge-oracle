@@ -36,6 +36,20 @@ export default async function SignalDetailPage({
 
   const status = signalStatus(signal);
 
+  // Deep-link to the portfolio "record bet" form, prefilled from this signal.
+  const trackSide =
+    signal.strategy === "set_arb" ? "set" : signal.kind === "buy_yes" ? "yes" : "no";
+  const trackParams = new URLSearchParams({
+    market_id: signal.market_id,
+    condition_id: signal.condition_id,
+    strategy: signal.strategy,
+    side: trackSide,
+    ...(signal.economics?.ask != null ? { entry_price: String(signal.economics.ask) } : {}),
+    ...(signal.economics?.stake_usd
+      ? { stake_usd: String(signal.economics.stake_usd) }
+      : {}),
+  });
+
   return (
     <article className={styles.detail}>
       <Link href="/signals" className={styles.back}>
@@ -54,6 +68,9 @@ export default async function SignalDetailPage({
           <span aria-hidden="true"> · </span>
           <time dateTime={signal.time}>{signal.time.replace("T", " ").replace("+00:00", " UTC")}</time>
         </p>
+        <Link href={`/portfolio?${trackParams.toString()}`} className={styles.track}>
+          + Track this bet
+        </Link>
       </header>
 
       <section className={styles.metrics} aria-label="Edge and sizing">

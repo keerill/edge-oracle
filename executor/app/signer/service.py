@@ -12,6 +12,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 from app.models.intent import IntentEnvelope
+from app.signer.approval import verify_approval_token
 from app.signer.crypto import LocalSigner, SignedIntent
 from app.signer.policy import SignerPolicy, evaluate_policy
 
@@ -29,9 +30,14 @@ def sign_intent(
     signer: LocalSigner,
     *,
     now: datetime,
-    approval_valid: bool,
+    approval_token: str | None = None,
+    approval_secret: str = "",
 ) -> SignResult:
-    """Policy-then-sign. Returns the signature only if every policy check passes."""
+    """Policy-then-sign. The signer verifies the approval token itself (HMAC bound to this exact
+    intent hash + TTL); a below-threshold intent needs none. Signs only if every check passes."""
+    approval_valid = bool(approval_secret) and verify_approval_token(
+        approval_token, envelope.intent_hash, approval_secret, now=now
+    )
     verdict = evaluate_policy(envelope, policy, now=now, approval_valid=approval_valid)
     if not verdict.allowed:
         return SignResult(signed=None, rejected_reasons=verdict.reasons)

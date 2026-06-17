@@ -14,10 +14,17 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.models.intent import Intent, IntentEnvelope
+from app.signer.approval import mint_approval_token
 from app.signer.crypto import LocalSigner, recover_signer
 from app.signer.eip712 import intent_typed_data
 from app.signer.policy import SignerPolicy
 from app.signer.service import sign_intent
+
+APPROVAL_SECRET = "test-approval-secret"
+
+
+def _token(env, *, expires=None):
+    return mint_approval_token(env.intent_hash, expires or EXP, APPROVAL_SECRET)
 
 # Well-known throwaway test key (Anvil/Hardhat account #0) — public, testnet-only, never a secret.
 TEST_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
@@ -102,8 +109,8 @@ def test_a_different_intent_recovers_but_to_a_different_hash():
 
 def test_service_signs_only_when_policy_allows():
     signer = LocalSigner(TEST_PK)
-    env = IntentEnvelope.seal(_intent(notional_usd=Decimal("40")))  # below threshold
-    result = sign_intent(env, _policy(), signer, now=NOW, approval_valid=False)
+    env = IntentEnvelope.seal(_intent(notional_usd=Decimal("40")))  # below threshold -> no token
+    result = sign_intent(env, _policy(), signer, now=NOW)
     assert result.signed is not None
     assert result.rejected_reasons == ()
     assert recover_signer(env, result.signed.signature) == TEST_ADDR
@@ -112,7 +119,8 @@ def test_service_signs_only_when_policy_allows():
 def test_service_refuses_to_sign_when_policy_denies():
     signer = LocalSigner(TEST_PK)
     env = IntentEnvelope.seal(_intent(to_address="0xEvil"))  # not allowlisted
-    result = sign_intent(env, _policy(), signer, now=NOW, approval_valid=True)
+    result = sign_intent(env, _policy(), signer, now=NOW,
+                         approval_token=_token(env), approval_secret=APPROVAL_SECRET)
     assert result.signed is None
     assert any("contract" in r for r in result.rejected_reasons)
 
@@ -121,13 +129,21 @@ def test_service_refuses_tampered_envelope():
     signer = LocalSigner(TEST_PK)
     good = IntentEnvelope.seal(_intent())
     doctored = IntentEnvelope(intent=_intent(to_address="0xEvil"), intent_hash=good.intent_hash)
-    result = sign_intent(doctored, _policy(), signer, now=NOW, approval_valid=True)
+    result = sign_intent(doctored, _policy(), signer, now=NOW,
+                         approval_token=_token(good), approval_secret=APPROVAL_SECRET)
     assert result.signed is None
     assert any("hash" in r for r in result.rejected_reasons)
 
 
-def test_service_refuses_above_threshold_without_approval():
+def test_service_refuses_above_threshold_without_a_valid_token():
     signer = LocalSigner(TEST_PK)
     env = IntentEnvelope.seal(_intent(notional_usd=Decimal("80")))  # > 50 threshold
-    assert sign_intent(env, _policy(), signer, now=NOW, approval_valid=False).signed is None
-    assert sign_intent(env, _policy(), signer, now=NOW, approval_valid=True).signed is not None
+    # no token
+    assert sign_intent(env, _policy(), signer, now=NOW).signed is None
+    # a token minted for a DIFFERENT intent doesn't unlock this one
+    other = IntentEnvelope.seal(_intent(notional_usd=Decimal("81")))
+    assert sign_intent(env, _policy(), signer, now=NOW,
+                       approval_token=_token(other), approval_secret=APPROVAL_SECRET).signed is None
+    # the correct, intent-bound token signs
+    assert sign_intent(env, _policy(), signer, now=NOW,
+                       approval_token=_token(env), approval_secret=APPROVAL_SECRET).signed is not None

@@ -1368,6 +1368,38 @@ dep; verify the header-name form / domain name / posted JSON against the live AP
 `relay.submit(dry_run=False)` → build order → `sign_eip712` → `place_order`; start with a tiny
 post-and-cancel. Then Phase 7 (AWS KMS + Gnosis Safe + capped mainnet canary + human sign-off).
 
+## Slice: Execution Phase 6-UI — approvals dashboard  ✅ done (2026-06-17)
+
+The dashboard half of semi-auto: see the intents the consumer proposed and approve them with a
+click (sign + dry-run submit). Crosses the web↔executor boundary the architecture keeps (web BFF →
+executor control API, never the browser directly), staying dry-run.
+
+**Executor (control API):**
+- **`store.load_pending_intents`** — intents whose latest audit event is `pending_approval`
+  (`DISTINCT ON (intent_id)` over the audit log). Refactored `_intent_from_row` shared with
+  `load_intent`.
+- **`app/api/main.py`** — a small API-key-guarded FastAPI app (separate from the signer service):
+  `GET /intents/pending`, `GET /intents/{id}` (intent + audit trail), `POST /intents/{id}/approve`
+  (→ `approve_and_sign`, dry-run). `config`: `EDGE_EXEC_CONTROL_API_KEY`.
+
+**Web:**
+- `lib/env.ts` `EXEC_API_URL`/`EXEC_API_KEY`; `lib/schemas/exec.ts` (Zod boundary);
+  `lib/api/exec.ts` (typed client); BFF `/api/exec/pending` + `/api/exec/approve/[id]`.
+- `app/approvals/page.tsx` — pending list with a per-intent Approve button + a dry-run banner;
+  AppShell nav gains **Approvals**.
+
+**Files:** new `executor/app/api/{__init__,main}.py`, `executor/tests/test_control_api.py`;
+`web/src/lib/schemas/exec.ts`, `web/src/lib/api/exec.ts`, `web/src/app/api/exec/**`,
+`web/src/app/approvals/*`, `web/tests/exec-schema.test.ts`; modified `executor/app/db/store.py`,
+`executor/app/config.py`, `web/src/lib/env.ts`, `web/src/components/AppShell.tsx`,
+`web/.env.local.example`. **Verify:** executor `uv run pytest -q` → 108 passed (with exec DB),
+ruff clean; web `pnpm test` → 83 passed, `tsc` clean, `pnpm build` green.
+
+**Run the full local semi-auto loop:** quant API+pollers (`:8000`) → executor consumer
+(`python -m app.orchestrator.consume`) → executor control API
+(`uvicorn app.api.main:app --port 8010`) → web (`pnpm dev`) → open `/approvals`, click Approve
+(dry-run). Still external for LIVE money: Phase 5b flip (creds + verify) and Phase 7.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

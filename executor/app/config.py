@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     # TESTNET-ONLY local signing key (Phase 4 offline). A SECRET — inject via a secret manager,
     # NEVER commit, and NEVER set on mainnet (production uses kms_key_id, key never exported).
     signer_private_key: str | None = None
+    # Secret the signer uses to verify approval-token HMACs (shared with the approval UI). SECRET.
+    approval_secret: str = ""
     approval_token_ttl_s: int = 300
 
     # --- Allowlists (csv -> frozenset via the properties below) --------------

@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     exec_intents_channel: str = "edge:exec:intents"
     exec_approvals_channel: str = "edge:exec:approvals"
 
+    # --- Control API (Phase 6-UI: list/approve pending intents) --------------
+    # When set, the control API requires a matching X-API-Key header (the web BFF sends it).
+    # SECRET — inject via env / a secret manager, never commit. Unset = open (local dev only).
+    control_api_key: str | None = None
+
     # --- Observability --------------------------------------------------------
     log_level: str = "INFO"
     log_json: bool = True

@@ -52,16 +52,8 @@ async def insert_intent(session: AsyncSession, intent: Intent, intent_hash: str)
     )
 
 
-async def load_intent(session: AsyncSession, intent_id: str) -> Intent | None:
-    """Rebuild a stored ``Intent`` by id (the read counterpart to ``insert_intent``), so an
-    approved-later flow can re-seal the SAME intent (identical hash) without re-forming it."""
-    row = (
-        await session.execute(
-            sa.select(exec_intents).where(exec_intents.c.intent_id == intent_id)
-        )
-    ).mappings().first()
-    if row is None:
-        return None
+def _intent_from_row(row) -> Intent:
+    """Rebuild an ``Intent`` from an ``exec_intents`` mapping row."""
     return Intent(
         intent_id=row["intent_id"],
         created_at=row["created_at"],
@@ -82,6 +74,38 @@ async def load_intent(session: AsyncSession, intent_id: str) -> Intent | None:
         approve_amount=row["approve_amount"],
         nonce=row["nonce"],
     )
+
+
+async def load_intent(session: AsyncSession, intent_id: str) -> Intent | None:
+    """Rebuild a stored ``Intent`` by id (the read counterpart to ``insert_intent``), so an
+    approved-later flow can re-seal the SAME intent (identical hash) without re-forming it."""
+    row = (
+        await session.execute(
+            sa.select(exec_intents).where(exec_intents.c.intent_id == intent_id)
+        )
+    ).mappings().first()
+    return None if row is None else _intent_from_row(row)
+
+
+async def load_pending_intents(session: AsyncSession) -> list[Intent]:
+    """Intents whose LATEST audit event is ``pending_approval`` — awaiting a human decision.
+
+    ``DISTINCT ON (intent_id)`` over the audit log (newest first) gives each intent's current
+    state; we keep those still at ``pending_approval`` (not yet approved / signed / rejected)."""
+    latest = (
+        sa.select(exec_audit.c.intent_id, exec_audit.c.event)
+        .distinct(exec_audit.c.intent_id)
+        .order_by(exec_audit.c.intent_id, exec_audit.c.time.desc(), exec_audit.c.id.desc())
+        .subquery()
+    )
+    stmt = (
+        sa.select(exec_intents)
+        .join(latest, latest.c.intent_id == exec_intents.c.intent_id)
+        .where(latest.c.event == "pending_approval")
+        .order_by(exec_intents.c.created_at.desc())
+    )
+    rows = (await session.execute(stmt)).mappings().all()
+    return [_intent_from_row(r) for r in rows]
 
 
 async def append_audit(

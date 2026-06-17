@@ -33,6 +33,7 @@ from app.models.alert import Alert
 from app.models.backtest import BacktestResult, MarketResolution
 from app.models.calibration import CalibrationRecord
 from app.observability.alert_bus import publish_alert
+from app.observability.alert_dedup import AlertDeduper
 from app.observability.alerts import evaluate_calibration_drift, evaluate_drawdown
 from app.observability.logging import configure_logging
 from app.observability.metrics import start_metrics_server
@@ -55,14 +56,19 @@ async def run_monitor_once(
     fetch_backtest: BacktestFetcher,
     load_calibration_records: CalibrationLoader,
     now: Callable[[], datetime] = _utcnow,
+    deduper: AlertDeduper | None = None,
 ) -> list[Alert]:
-    """Evaluate drawdown + calibration drift once, publish any alerts, and return them."""
-    alerts: list[Alert] = []
+    """Evaluate drawdown + calibration drift once, publish any alerts, and return them.
+
+    When a ``deduper`` is supplied (the loop owns one across cycles), a persistent condition is
+    rate-limited: the same alert kind republishes only after its cooldown, and re-arms once the
+    condition clears. Returns the alerts actually published this cycle."""
+    detected: list[Alert] = []
 
     result = await fetch_backtest()
     dd_alert = evaluate_drawdown(result, settings.drawdown_alert_threshold, now=now())
     if dd_alert is not None:
-        alerts.append(dd_alert)
+        detected.append(dd_alert)
 
     records = await load_calibration_records()
     if records:  # an empty journal has no defined calibration -> no drift alert
@@ -71,8 +77,9 @@ async def run_monitor_once(
             summary, settings.calibration_drift_threshold, now=now()
         )
         if drift_alert is not None:
-            alerts.append(drift_alert)
+            detected.append(drift_alert)
 
+    alerts = deduper.filter(detected, now()) if deduper is not None else detected
     for alert in alerts:
         await publish_alert(redis, settings.alerts_channel, alert)
         logger.warning(
@@ -92,7 +99,9 @@ async def run_monitor(
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     max_cycles: int | None = None,
 ) -> None:
-    """Run the monitor loop forever (or ``max_cycles`` times, for tests). Per-cycle isolation."""
+    """Run the monitor loop forever (or ``max_cycles`` times, for tests). Per-cycle isolation.
+    Owns one ``AlertDeduper`` across cycles so a persistent condition isn't re-alerted every tick."""
+    deduper = AlertDeduper(settings.alert_cooldown_s)
     cycle = 0
     while max_cycles is None or cycle < max_cycles:
         try:
@@ -102,6 +111,7 @@ async def run_monitor(
                 fetch_backtest=fetch_backtest,
                 load_calibration_records=load_calibration_records,
                 now=now,
+                deduper=deduper,
             )
         except Exception as exc:  # noqa: BLE001 - never let one cycle kill the loop
             logger.exception("monitor cycle failed: %r", exc)

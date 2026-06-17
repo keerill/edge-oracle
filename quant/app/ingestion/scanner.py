@@ -54,7 +54,8 @@ class ScanResult:
 
 
 async def discover_universe(gamma: GammaClient, settings: Settings) -> list[Market]:
-    """Fetch + rank the tracked universe (top-N by liquidity, or allowlist)."""
+    """Fetch + rank the tracked universe (top-N by liquidity, or allowlist), then resolve the
+    category for any selected market Gamma left uncategorized (a secondary /events tag fetch)."""
     raw_markets = await gamma.list_active_markets(
         limit=settings.gamma_page_limit, order="liquidity", ascending=False
     )
@@ -64,9 +65,32 @@ async def discover_universe(gamma: GammaClient, settings: Settings) -> list[Mark
             markets.append(transform.market_from_raw(raw))
         except ValueError as exc:
             logger.debug("skipping market %s during discovery: %s", raw.id, exc)
-    return transform.rank_and_select(
+    selected = transform.rank_and_select(
         markets, top_n=settings.top_n, allowlist=settings.allowlist_ids
     )
+    return await _resolve_categories(gamma, selected)
+
+
+async def _resolve_categories(gamma: GammaClient, markets: list[Market]) -> list[Market]:
+    """Fill ``category`` for selected markets missing it, from their event tags (one batched
+    /events call). Best-effort: a fetch failure leaves categories as-is (the fee table then
+    falls back to its conservative default). Decision stays pure (``category_from_tags``)."""
+    need = {m.event_id for m in markets if m.category is None and m.event_id}
+    if not need:
+        return markets
+    try:
+        tags_by_event = await gamma.fetch_event_tags(sorted(need))
+    except Exception as exc:  # noqa: BLE001 - category is an optimization, never fatal
+        logger.warning("category enrichment failed (using defaults): %r", exc)
+        return markets
+    out: list[Market] = []
+    for m in markets:
+        if m.category is None and m.event_id in tags_by_event:
+            cat = transform.category_from_tags(tags_by_event[m.event_id])
+            out.append(m.model_copy(update={"category": cat}) if cat else m)
+        else:
+            out.append(m)
+    return out
 
 
 async def _load_tracked(session: AsyncSession) -> list[Market]:

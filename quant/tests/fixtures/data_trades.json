@@ -1,0 +1,30 @@
+[
+  {
+    "proxyWallet": "0x93858a687a5039cd7167243df7fdec90a4ccf3ad",
+    "side": "BUY",
+    "asset": "98578534202029301876734952437102892680132626239125586048359740351496370265187",
+    "conditionId": "0x5ed1ac33d62753202213323b9fd4acb5fb5ea5ced7a187784cc697fbec296f54",
+    "size": 30.864194,
+    "price": 0.8099999954639995,
+    "timestamp": 1781681893,
+    "title": "Bitcoin Up or Down - June 17, 3:35AM-3:40AM ET",
+    "slug": "btc-updown-5m-1781681700",
+    "outcome": "Down",
+    "outcomeIndex": 1,
+    "transactionHash": "0x35aae5acc0af3247162957ffbaf104652ac878659bd5f53ad293884ee6d666bf"
+  },
+  {
+    "proxyWallet": "0x1d2a47b6ec514a0fe26cb07a45cd4702b4647682",
+    "side": "SELL",
+    "asset": "23564271342473569433084363778108541107335276261115637536038054802911658064919",
+    "conditionId": "0x2a4f962b950e09e32e7db3d0c5d5b00765bb7fc7129e566cf3ba4e3153e619ac",
+    "size": 23.96875,
+    "price": 0.32,
+    "timestamp": 1781681893,
+    "title": "Portugal vs. DR Congo: O/U 3.5",
+    "slug": "fifwc-prt-cdr-2026-06-17-total-3pt5",
+    "outcome": "Over",
+    "outcomeIndex": 0,
+    "transactionHash": "0x536a87b121fbf09a18d2a1a7e56dfdc40754da387ad46ddc4154f015c12d4804"
+  }
+]

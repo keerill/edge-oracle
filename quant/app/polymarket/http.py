@@ -11,6 +11,7 @@ Exponential backoff with full-ish jitter, capped; honor ``Retry-After`` when pre
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -135,8 +136,14 @@ async def request_json(
     *,
     settings: Settings,
     params: dict[str, Any] | None = None,
+    parse_float: Callable[[str], Any] | None = None,
 ) -> Any:
-    """GET ``url`` with the configured retry policy and return parsed JSON."""
+    """GET ``url`` with the configured retry policy and return parsed JSON.
+
+    ``parse_float`` (e.g. ``str``) is forwarded to ``json.loads`` so endpoints that send money
+    as JSON numbers (the Data API ``/trades``) can be decoded straight from the wire literal —
+    keeping a float out of the money path. Default keeps the fast ``response.json()`` path.
+    """
     response = await request_with_retry(
         lambda: client.get(url, params=params),
         max_retries=settings.max_retries,
@@ -144,4 +151,6 @@ async def request_json(
         cap=settings.backoff_cap_s,
         jitter=settings.backoff_jitter,
     )
+    if parse_float is not None:
+        return json.loads(response.text, parse_float=parse_float)
     return response.json()

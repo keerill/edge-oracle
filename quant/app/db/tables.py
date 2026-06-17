@@ -53,6 +53,24 @@ quotes = sa.Table(
 
 sa.Index("ix_quotes_token_time", quotes.c.token_id, quotes.c.time.desc())
 
+# Trade prints — one row per executed trade on a tracked market. A hypertable on ``time`` like
+# ``quotes`` (no PK — TimescaleDB restricts unique constraints not covering the partition column).
+# ``price``/``size`` are unbounded NUMERIC (Decimal end-to-end). ``trade_id`` is the fill's tx hash
+# (not guaranteed unique per row — a tx can carry several fills — so it's a plain column, not a key).
+trades = sa.Table(
+    "trades",
+    metadata,
+    sa.Column("time", sa.TIMESTAMP(timezone=True), nullable=False),
+    sa.Column("token_id", sa.Text, nullable=False),
+    sa.Column("market_id", sa.Text, nullable=False),
+    sa.Column("price", sa.Numeric, nullable=False),
+    sa.Column("size", sa.Numeric, nullable=False),
+    sa.Column("taker_side", sa.Text, nullable=True),
+    sa.Column("trade_id", sa.Text, nullable=False),
+)
+
+sa.Index("ix_trades_token_time", trades.c.token_id, trades.c.time.desc())
+
 # Detected signals — one row per flagged market per scan, across strategies. A *regular*
 # table, not a hypertable: signals are sparse and append-only, so time-chunking buys
 # little. No PK (mirrors ``quotes``). ``strategy`` tags the producer and ``kind`` is its

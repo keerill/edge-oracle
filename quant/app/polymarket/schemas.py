@@ -17,11 +17,22 @@ from pydantic import BaseModel, ConfigDict
 # --- Gamma (market discovery) -------------------------------------------------
 
 
+class RawGammaTag(BaseModel):
+    model_config = ConfigDict(extra="ignore", coerce_numbers_to_str=True)
+
+    id: str | None = None
+    label: str | None = None
+    slug: str | None = None
+
+
 class RawGammaEventRef(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str | None = None
     title: str | None = None
+    # Tags are NOT returned by Gamma /markets (only by /events); populated by a
+    # secondary fetch during discovery so the category can be derived. Empty when absent.
+    tags: list[RawGammaTag] = []
 
 
 class RawGammaMarket(BaseModel):
@@ -145,6 +156,24 @@ class RawSpread(BaseModel):
     spread: str
     bid: str | None = None
     ask: str | None = None
+
+
+class RawTrade(BaseModel):
+    # Data API ``/trades`` print. ``price``/``size`` arrive as JSON **numbers**; we keep
+    # them as ``str`` here (coerce_numbers_to_str) so the single Decimal coercion happens
+    # downstream in ``transform`` — and we parse the response with ``parse_float=str`` so the
+    # exact wire literal is preserved (no float ever touches the money path).
+    model_config = ConfigDict(extra="ignore", coerce_numbers_to_str=True)
+
+    asset: str  # the token id that traded
+    conditionId: str
+    side: str | None = None  # "BUY" | "SELL"
+    size: str
+    price: str
+    timestamp: int  # unix seconds
+    transactionHash: str
+    outcome: str | None = None
+    outcomeIndex: int | None = None
 
 
 class RawHistoryPoint(BaseModel):

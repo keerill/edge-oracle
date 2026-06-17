@@ -130,3 +130,29 @@ async def test_monitor_handles_empty_calibration_journal() -> None:
     )
 
     assert alerts == []
+
+
+async def test_persistent_alert_is_deduped_across_cycles():
+    """A condition that holds across cycles publishes once (cooldown), not every tick."""
+    from app.observability.alert_dedup import AlertDeduper
+
+    redis = _FakeRedis()
+    s = _settings()
+    breaching = _result(["1000", "700"])  # max drawdown 0.30 > 0.20 threshold
+
+    async def fetch_backtest():
+        return breaching
+
+    async def load_calibration_records():
+        return []
+
+    deduper = AlertDeduper(cooldown_s=3600)
+    a1 = await run_monitor_once(s, redis, fetch_backtest=fetch_backtest,
+                                load_calibration_records=load_calibration_records,
+                                now=lambda: AT, deduper=deduper)
+    a2 = await run_monitor_once(s, redis, fetch_backtest=fetch_backtest,
+                                load_calibration_records=load_calibration_records,
+                                now=lambda: AT, deduper=deduper)
+    assert [x.kind for x in a1] == ["drawdown_breach"]
+    assert a2 == []  # suppressed within cooldown
+    assert len(redis.published) == 1  # published only once

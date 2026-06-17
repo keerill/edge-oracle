@@ -16,6 +16,7 @@ from app.advisor.view import advise
 from app.api.deps import get_app_settings, get_session
 from app.config import Settings
 from app.ingestion import store
+from app.math.calibration import CalibrationParams, summarize
 from app.models.advisor import AdvisedSignal
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
@@ -49,12 +50,24 @@ def _parse_id(raw: str) -> tuple[str, str, int]:
         raise HTTPException(status_code=422, detail=f"malformed signal id: {raw!r}") from exc
 
 
+async def effective_kelly_frac(session: AsyncSession, settings: Settings) -> Decimal:
+    """The live Kelly fraction: the configured ``kelly_frac``, shrunk (never raised) by the
+    calibration journal when the model has proven overconfident. Falls back to the configured
+    value on an empty journal or when there's no high-confidence evidence yet."""
+    records = await store.load_calibration(session)
+    if not records:
+        return settings.kelly_frac
+    adjusted = summarize(records, CalibrationParams(base_frac=settings.kelly_frac)).kelly.adjusted_frac
+    return adjusted if adjusted is not None else settings.kelly_frac
+
+
 def _enrich(
     signal: Signal,
     markets_by_id: dict[str, Market],
     quotes_by_token: dict[str, QuoteSnapshot],
     settings: Settings,
     bankroll: Decimal,
+    frac: Decimal,
 ) -> AdvisedSignal:
     market = markets_by_id.get(signal.market_id)
     yes_quote = quotes_by_token.get(market.yes_token_id) if market else None
@@ -66,7 +79,7 @@ def _enrich(
         yes_quote=yes_quote,
         no_quote=no_quote,
         bankroll=bankroll,
-        frac=settings.kelly_frac,
+        frac=frac,
         cap=settings.kelly_cap,
         slippage=settings.arb_slippage,
         gas=settings.arb_gas,
@@ -101,8 +114,9 @@ async def list_signals(
     markets_by_id = {m.market_id: m for m in markets}
     token_ids = [tid for m in markets for tid in (m.yes_token_id, m.no_token_id)]
     quotes_by_token = await store.load_latest_quotes(session, token_ids=token_ids or None)
+    frac = await effective_kelly_frac(session, settings)
 
-    advised = [_enrich(s, markets_by_id, quotes_by_token, settings, bank) for s in signals]
+    advised = [_enrich(s, markets_by_id, quotes_by_token, settings, bank, frac) for s in signals]
     advised.sort(key=lambda a: a.net_edge, reverse=True)
     return advised
 
@@ -134,4 +148,5 @@ async def get_signal(
     market = markets_by_id.get(market_id)
     token_ids = [market.yes_token_id, market.no_token_id] if market else None
     quotes_by_token = await store.load_latest_quotes(session, token_ids=token_ids)
-    return _enrich(match, markets_by_id, quotes_by_token, settings, bank)
+    frac = await effective_kelly_frac(session, settings)
+    return _enrich(match, markets_by_id, quotes_by_token, settings, bank, frac)

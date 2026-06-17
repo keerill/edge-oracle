@@ -19,7 +19,49 @@ from decimal import Decimal
 from app.models.book import BookLevel, OrderBook
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
-from app.polymarket.schemas import RawGammaMarket, RawOrderBook
+from app.polymarket.schemas import RawGammaMarket, RawGammaTag, RawOrderBook
+
+# Tag slug/label -> canonical fee category (SPEC §6 keys). Topical tags map; generic ones
+# ("all", "pop-culture", "exchange", ...) are absent so they resolve to None (-> the fee
+# table's most-conservative default). Extend as new tag vocabularies are observed.
+TAG_CATEGORY: dict[str, str] = {
+    # crypto
+    "crypto": "crypto", "bitcoin": "crypto", "btc": "crypto", "ethereum": "crypto",
+    "eth": "crypto", "solana": "crypto", "crypto-prices": "crypto",
+    # politics
+    "politics": "politics", "us-politics": "politics", "elections": "politics",
+    "trump": "politics", "geopolitics": "geopolitical", "geopolitical": "geopolitical",
+    "war": "geopolitical",
+    # sports
+    "sports": "sports", "nba": "sports", "nfl": "sports", "mlb": "sports", "nhl": "sports",
+    "soccer": "sports", "football": "sports", "tennis": "sports", "ufc": "sports",
+    "epl": "sports", "fifa": "sports", "fifwc": "sports",
+    # finance / economics
+    "finance": "finance", "business": "finance", "stocks": "finance", "fed": "finance",
+    "economics": "economics", "economy": "economics", "inflation": "economics",
+    "cpi": "economics", "gdp": "economics",
+}
+
+
+def category_from_tags(tags: Sequence[RawGammaTag]) -> str | None:
+    """First tag (in order) whose slug/label maps to a canonical category, else ``None``."""
+    for tag in tags:
+        for key in (tag.slug, tag.label):
+            if key and key.strip().casefold() in TAG_CATEGORY:
+                return TAG_CATEGORY[key.strip().casefold()]
+    return None
+
+
+def derive_category(raw: RawGammaMarket) -> str | None:
+    """The market's own ``category`` (normalized) if present, else derived from its events'
+    tags. ``None`` when neither yields a known category (the fee table then defaults safely)."""
+    if raw.category and raw.category.strip():
+        return raw.category.strip().casefold()
+    for event in raw.events or []:
+        derived = category_from_tags(event.tags)
+        if derived is not None:
+            return derived
+    return None
 
 
 def parse_stringified_str_array(raw: str | list[str] | None) -> list[str]:
@@ -69,7 +111,7 @@ def market_from_raw(raw: RawGammaMarket) -> Market:
         condition_id=raw.conditionId,
         question=raw.question,
         slug=raw.slug,
-        category=raw.category,
+        category=derive_category(raw),
         event_id=raw.events[0].id if raw.events else None,
         outcomes=outcomes,
         yes_token_id=tokens[0],

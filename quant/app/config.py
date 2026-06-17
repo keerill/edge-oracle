@@ -32,10 +32,12 @@ class Settings(BaseSettings):
     scan_interval_s: float = 15.0
     discovery_interval_s: float = 300.0
     gamma_page_limit: int = 500  # Gamma caps /markets limit at 500
+    trades_limit: int = 100  # max trade prints fetched per market per cycle (Data API /trades)
 
     # --- Polymarket endpoints -------------------------------------------------
     gamma_base_url: str = "https://gamma-api.polymarket.com"
     clob_base_url: str = "https://clob.polymarket.com"
+    data_base_url: str = "https://data-api.polymarket.com"  # trade prints (/trades)
     # CLOB market WebSocket (live order-book deltas). Public, no auth for the market channel.
     clob_ws_url: str = "wss://ws-subscribe.clob.polymarket.com/ws/market"
 
@@ -53,6 +55,18 @@ class Settings(BaseSettings):
     arb_gas: Decimal = Decimal("0.01")  # per-set on-chain cost estimate (split/merge/redeem)
     arb_slippage: Decimal = Decimal("0.01")  # per-set buffer beyond modeled book depth
     arb_min_net_edge: Decimal = Decimal(0)  # extra profit gate; flag only when net > this
+
+    # --- Price-signal scanner (favourite-longshot + extreme-correction) -------
+    # Bands/nudges mirror the pure Params defaults; override per-deployment as live spreads
+    # are observed. The scanner reads the latest YES midpoint from quotes and persists signals.
+    longshot_lo: Decimal = Decimal("0.05")
+    longshot_hi: Decimal = Decimal("0.15")
+    favourite_lo: Decimal = Decimal("0.75")
+    favourite_hi: Decimal = Decimal("0.92")
+    correction_lo: Decimal = Decimal("0.15")
+    correction_hi: Decimal = Decimal("0.85")
+    correction_nudge_min: Decimal = Decimal("0.03")
+    correction_nudge_max: Decimal = Decimal("0.08")
 
     # --- Backtest harness ----------------------------------------------------
     # Pure mirror lives in app.models.backtest.BacktestParams; the engine maps these on.
@@ -76,6 +90,13 @@ class Settings(BaseSettings):
     backoff_cap_s: float = 30.0
     backoff_jitter: bool = True
     max_concurrency: int = 8
+
+    # --- API hardening (auth / CORS / rate limit) ----------------------------
+    # When api_key is set, the advisor routes require a matching X-API-Key header (the web BFF
+    # sends it). The key is a SECRET — inject via env / a secret manager, never commit it.
+    api_key: str | None = None
+    cors_origins: str = ""  # csv of allowed browser origins (empty = none; BFF is server-side)
+    rate_limit_per_min: int = 0  # 0 disables; else max requests per client IP per minute
 
     # --- Lifespan -------------------------------------------------------------
     # When False (default), the FastAPI app does NOT start the poller; run it via
@@ -112,6 +133,8 @@ class Settings(BaseSettings):
     calibration_drift_threshold: Decimal = Decimal("0.05")  # claimed-realized gap
     ws_drop_alert_threshold: int = 1  # reconnects before alerting (1 = any drop)
     monitor_interval_s: float = 60.0
+    # While a condition persists, re-alert at most once per this cooldown (re-arms on clear).
+    alert_cooldown_s: float = 3600.0
 
     @property
     def allowlist_ids(self) -> tuple[str, ...]:

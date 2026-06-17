@@ -18,9 +18,11 @@ from app.db.tables import calibration as calibration_table
 from app.db.tables import markets as markets_table
 from app.db.tables import quotes as quotes_table
 from app.db.tables import signals as signals_table
+from app.db.tables import trades as trades_table
 from app.models.calibration import CalibrationRecord
 from app.models.market import Market
 from app.models.quote import QuoteSnapshot
+from app.models.trade import Trade
 from app.models.signal import (
     ArbSignal,
     ExtremeCorrectionSignal,
@@ -89,6 +91,49 @@ async def insert_quotes(session: AsyncSession, quotes: Sequence[QuoteSnapshot]) 
     rows = [q.model_dump() for q in quotes]
     await session.execute(insert(quotes_table), rows)
     return len(rows)
+
+
+async def insert_trades(session: AsyncSession, trades: Sequence[Trade]) -> int:
+    """Append trade prints in a single batch insert (``Decimal`` straight to NUMERIC)."""
+    if not trades:
+        return 0
+    rows = [t.model_dump() for t in trades]
+    await session.execute(insert(trades_table), rows)
+    return len(rows)
+
+
+async def load_trades(
+    session: AsyncSession,
+    *,
+    token_ids: Sequence[str] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[Trade]:
+    """Reload stored trade prints **time-ordered** (then by token) — the read counterpart to
+    ``insert_trades``. Optional ``token_ids`` filter; ``start``/``end`` bound the window
+    half-open ``[start, end)``. ``Decimal`` comes straight back from NUMERIC."""
+    stmt = select(trades_table)
+    if token_ids is not None:
+        stmt = stmt.where(trades_table.c.token_id.in_(list(token_ids)))
+    if start is not None:
+        stmt = stmt.where(trades_table.c.time >= start)
+    if end is not None:
+        stmt = stmt.where(trades_table.c.time < end)
+    rows = (
+        await session.execute(stmt.order_by(trades_table.c.time, trades_table.c.token_id))
+    ).mappings().all()
+    return [
+        Trade(
+            time=r["time"],
+            token_id=r["token_id"],
+            market_id=r["market_id"],
+            price=r["price"],
+            size=r["size"],
+            taker_side=r["taker_side"],
+            trade_id=r["trade_id"],
+        )
+        for r in rows
+    ]
 
 
 async def load_tracked_markets(session: AsyncSession) -> list[Market]:

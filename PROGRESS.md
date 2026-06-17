@@ -690,6 +690,25 @@ optional future scraper).
 - **Dedicated monitor loop** for the two periodic alerts (drawdown/drift); WS-drop is event-driven in
   the streaming engine. **One dashboard toast lane** for alerts + opportunities.
 
+### Re-verified (2026-06-17)
+Re-ran the full verification today (no source changes since the slice was committed — nothing in the
+tree to re-implement; this confirms it still works end-to-end):
+- `cd quant && uv run pytest -q` → **230 passed, 15 skipped** (DB-gated). `cd web && corepack
+  pnpm@9.15.0 test` → **79 passed**.
+- **`/metrics` (live):** `uvicorn app.main:app` + `curl localhost:8000/metrics` rendered every
+  `edge_*` family (`edge_http_request_duration_seconds`, `edge_poller_*`, `edge_signals_total`,
+  `edge_ws_*`, `edge_alerts_total`); `GET /health` → `{"status":"ok"}`.
+- **Forced-error → alert (dev):** `docker compose … up -d` (Redis), subscribed `edge:alerts` via the
+  redis container, then:
+  - `python -m app.streaming.engine --mock-drop` → `{"kind":"ws_drop",...}` published every reconnect.
+  - `seed_demo` (35-row overconfident journal + `demo_resolutions.json`) then `python -m
+    app.monitoring.engine once` with demo backtest knobs + thresholds dd `0.01` / drift `0.05` →
+    **`drawdown_breach`** (max drawdown `0.01144…` ≥ `0.01`, severity error) **and**
+    **`calibration_drift`** (claimed `0.807` vs realized `0.727`, gap `0.08` ≥ `0.05`), both on
+    `edge:alerts`. (The web SSE → toast leg is covered by the web suite's alert-schema/SSE/toast tests.)
+- **Tidied:** added `.playwright-mcp/`, `*.png` (verification screenshots), and the generated
+  `quant/demo_resolutions.json` to `.gitignore` — none are source.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

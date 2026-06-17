@@ -1310,6 +1310,31 @@ autonomous (no external creds, stays dry-run, manual per trade).
 approval web UI; Redis consumer driving the pipeline from `edge:signals`; AWS KMS + Gnosis Safe +
 capped mainnet canary behind `EDGE_EXEC_ENABLED` + human sign-off.
 
+## Slice: Execution Phase 6b — signals consumer (auto-propose)  ✅ done (2026-06-17)
+
+The "auto" half of semi-auto: subscribe to the advisor's `edge:signals` stream and PROPOSE an
+intent for each actionable signal. Approval stays the deliberate human step (CLI) — the consumer
+never signs or submits, and nothing reaches a network (dry-run).
+
+- **`orchestrator/consumer.py`** — `process_message` (parse `AdvisedSignalView` → `propose_signal`
+  for actionable directional `extreme_correction`; skip arb/longshot/gated-zero-size; dedup by
+  source signal id) + `run_consumer` (loops an **injected** async stream, one txn per message).
+  The core has **no Redis dependency** — `redis_messages()` lazy-imports `redis.asyncio` and is the
+  only Redis-touching code, so the whole consumer is testable offline.
+- **`orchestrator/consume.py`** — CLI `python -m app.orchestrator.consume`.
+- **dep**: added `redis>=5` to the executor (runtime adapter only; same client the quant streaming
+  engine uses).
+
+The full local semi-auto loop now: advisor → `edge:signals` → `consume` (auto-propose,
+`pending_approval`) → `approve <intent_id>` (human → sign → dry-run submit) → audit trail.
+
+**Files:** new `executor/app/orchestrator/{consumer,consume}.py`, `executor/tests/test_consumer.py`;
+modified `executor/pyproject.toml`. **Verify:** `cd executor && uv run pytest -q` → 88 passed
+(with `EDGE_EXEC_TEST_DATABASE_URL`), ruff clean.
+
+**Still external (Phases 5b / 6-UI / 7):** live Polymarket CLOB submit (order schema + API creds);
+approval web UI; AWS KMS + Gnosis Safe + capped mainnet canary behind `EDGE_EXEC_ENABLED` + sign-off.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

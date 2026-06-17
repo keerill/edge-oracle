@@ -262,6 +262,51 @@ async def test_safe_only_sort_puts_arb_first(client):
     assert [d["strategy"] for d in data] == ["set_arb", "extreme_correction"]
 
 
+async def test_positions_create_and_portfolio_totals(client):
+    # empty portfolio
+    empty = (await client.get("/positions")).json()
+    assert empty["positions"] == []
+    assert Decimal(empty["total_exposure"]) == Decimal("0")
+
+    # record a YES bet at all-in 0.40 for $50 -> 125 shares; YES token (111) mid is 0.40.
+    created = await client.post(
+        "/positions",
+        json={
+            "market_id": "m1",
+            "condition_id": "c1",
+            "strategy": "extreme_correction",
+            "side": "yes",
+            "entry_price": "0.40",
+            "stake_usd": "50",
+        },
+    )
+    assert created.status_code == 201
+    assert Decimal(created.json()["shares"]) == Decimal("125")
+
+    portfolio = (await client.get("/positions")).json()
+    assert len(portfolio["positions"]) == 1
+    assert Decimal(portfolio["total_exposure"]) == Decimal("50")
+    # marked at YES mid 0.40: 125 * 0.40 - 50 = 0 unrealized.
+    pwp = portfolio["positions"][0]
+    assert Decimal(pwp["current_mid"]) == Decimal("0.40")
+    assert Decimal(pwp["unrealized_pnl"]) == Decimal("0")
+
+
+async def test_positions_rejects_bad_entry_price(client):
+    bad = await client.post(
+        "/positions",
+        json={
+            "market_id": "m1",
+            "condition_id": "c1",
+            "strategy": "extreme_correction",
+            "side": "yes",
+            "entry_price": "0",  # must be > 0
+            "stake_usd": "50",
+        },
+    )
+    assert bad.status_code == 422
+
+
 async def test_backtest_zero_bets_without_resolutions(client):
     resp = await client.get("/backtest")
     assert resp.status_code == 200

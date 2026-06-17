@@ -342,3 +342,69 @@ async def test_insert_calibration_roundtrip(sessionmaker):
     assert loaded[0].estimate == Decimal("0.90")
     assert [r.strategy for r in only] == ["favourite_longshot"]
     assert only[0].outcome == 0
+
+
+# --- user_config + positions (Slice D / E) ----------------------------------
+
+
+async def test_user_config_upsert_roundtrip(sessionmaker):
+    from app.models.config import UserConfig
+
+    cfg = UserConfig(
+        bankroll=Decimal("2500"),
+        kelly_frac=Decimal("0.2"),
+        kelly_cap=Decimal("0.04"),
+        corr_cap_frac=Decimal("0.05"),
+        risk_threshold=Decimal("0.5"),
+    )
+    async with sessionmaker() as s:
+        assert await store.load_user_config(s) is None  # nothing persisted yet
+        await store.upsert_user_config(s, cfg)
+        await s.commit()
+    async with sessionmaker() as s:
+        loaded = await store.load_user_config(s)
+        assert loaded == cfg
+        # upsert again with a different bankroll -> single row updated in place
+        await store.upsert_user_config(s, cfg.model_copy(update={"bankroll": Decimal("3000")}))
+        await s.commit()
+    async with sessionmaker() as s:
+        again = await store.load_user_config(s)
+        assert again is not None
+        assert again.bankroll == Decimal("3000")
+
+
+async def test_position_insert_load_and_settle(sessionmaker):
+    from app.math.profit import settled_pnl
+    from app.models.position import Position
+
+    pos = Position(
+        id="p1",
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+        market_id="m1",
+        condition_id="c1",
+        strategy="extreme_correction",
+        side="yes",
+        entry_price=Decimal("0.40"),
+        stake_usd=Decimal("50"),
+        shares=Decimal("125"),
+        status="open",
+    )
+    async with sessionmaker() as s:
+        await store.insert_position(s, pos)
+        await s.commit()
+    async with sessionmaker() as s:
+        opened = await store.load_positions(s, status="open")
+        assert len(opened) == 1
+        assert opened[0].shares == Decimal("125")
+        # settle as a YES win (outcome 1) -> realized profit_if_win = 75
+        pnl = settled_pnl("yes", Decimal("50"), Decimal("0.40"), outcome=1)
+        await store.settle_position(
+            s, "p1", outcome=1, pnl=pnl, resolved_at=datetime(2026, 7, 1, tzinfo=UTC)
+        )
+        await s.commit()
+    async with sessionmaker() as s:
+        assert await store.load_positions(s, status="open") == []
+        closed = await store.load_positions(s, status="closed")
+        assert len(closed) == 1
+        assert closed[0].pnl == Decimal("75")
+        assert closed[0].outcome == 1

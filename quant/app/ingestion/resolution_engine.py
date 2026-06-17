@@ -24,6 +24,7 @@ from app.config import Settings, get_settings
 from app.db.engine import get_sessionmaker
 from app.ingestion import store, transform
 from app.ingestion.resolution import calibration_from_resolution, resolved_outcome
+from app.math.profit import settled_pnl
 from app.models.calibration import CalibrationRecord
 from app.models.signal import ExtremeCorrectionSignal
 from app.observability.logging import configure_logging
@@ -93,14 +94,69 @@ async def run_resolution_scan_once(
     return ResolutionScanResult(checked=checked, journaled=n)
 
 
+@dataclass(frozen=True)
+class SettlementResult:
+    checked: int  # resolved markets seen with open positions
+    settled: int  # positions closed with realized P&L
+
+
+async def run_position_settlement_once(
+    gamma: GammaClient,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    *,
+    now: Callable[[], datetime] = _utcnow,
+) -> SettlementResult:
+    """One settlement cycle (timing-free). For each open directional position whose market has
+    resolved on Gamma, compute realized P&L and close it. Only ``status='open'`` rows are
+    settled, so re-runs are idempotent. Arb ('set') positions are skipped (no outcome-dependent
+    P&L to realize from a YES/NO resolution)."""
+    at = now()
+    async with sessionmaker() as session:
+        open_positions = await store.load_positions(session, status="open")
+
+    directional = [p for p in open_positions if p.side in ("yes", "no")]
+    if not directional:
+        return SettlementResult(checked=0, settled=0)
+
+    condition_ids = sorted({p.condition_id for p in directional})
+    resolved = await gamma.fetch_resolutions(condition_ids)
+    outcome_by_condition: dict[str, int] = {}
+    for raw in resolved:
+        outcomes = transform.parse_stringified_str_array(raw.outcomes)
+        prices = transform.parse_stringified_str_array(raw.outcomePrices)
+        outcome = resolved_outcome(outcomes, prices)
+        if outcome is not None:
+            outcome_by_condition[raw.conditionId] = outcome
+
+    settled = 0
+    async with sessionmaker() as session:
+        for p in directional:
+            outcome = outcome_by_condition.get(p.condition_id)
+            if outcome is None:
+                continue
+            pnl = settled_pnl(p.side, p.stake_usd, p.entry_price, outcome)
+            await store.settle_position(
+                session, p.id, outcome=outcome, pnl=pnl, resolved_at=at
+            )
+            settled += 1
+        await session.commit()
+
+    return SettlementResult(checked=len(outcome_by_condition), settled=settled)
+
+
 async def _run_once() -> None:
     settings = get_settings()
     sessionmaker = get_sessionmaker()
     async with make_http_client(settings) as http:
         gamma = GammaClient(http, settings)
         result = await run_resolution_scan_once(gamma, sessionmaker, settings)
+        settlement = await run_position_settlement_once(gamma, sessionmaker, settings)
     logger.info(
-        "one-shot resolution scan: checked=%d journaled=%d", result.checked, result.journaled
+        "one-shot resolution scan: checked=%d journaled=%d positions_settled=%d",
+        result.checked,
+        result.journaled,
+        settlement.settled,
     )
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.tables import calibration as calibration_table
 from app.db.tables import markets as markets_table
+from app.db.tables import positions as positions_table
 from app.db.tables import quotes as quotes_table
 from app.db.tables import signals as signals_table
 from app.db.tables import trades as trades_table
@@ -23,6 +25,7 @@ from app.db.tables import user_config as user_config_table
 from app.models.calibration import CalibrationRecord
 from app.models.config import UserConfig
 from app.models.market import Market
+from app.models.position import Position
 from app.models.quote import QuoteSnapshot
 from app.models.signal import (
     ArbSignal,
@@ -345,6 +348,60 @@ async def upsert_user_config(session: AsyncSession, config: UserConfig) -> None:
     set_["updated_at"] = func.now()
     stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=set_)
     await session.execute(stmt)
+
+
+def _position_from_row(r) -> Position:
+    return Position(
+        id=r["id"],
+        created_at=r["created_at"],
+        market_id=r["market_id"],
+        condition_id=r["condition_id"],
+        strategy=r["strategy"],
+        side=r["side"],
+        entry_price=r["entry_price"],
+        stake_usd=r["stake_usd"],
+        shares=r["shares"],
+        status=r["status"],
+        outcome=r["outcome"],
+        pnl=r["pnl"],
+        resolved_at=r["resolved_at"],
+        signal_id=r["signal_id"],
+    )
+
+
+async def insert_position(session: AsyncSession, position: Position) -> None:
+    """Record a placed bet (the server has stamped id/created_at/shares)."""
+    await session.execute(insert(positions_table).values(position.model_dump()))
+
+
+async def load_positions(
+    session: AsyncSession, *, status: str | None = None
+) -> list[Position]:
+    """Reload portfolio positions, newest first. Optional ``status`` filter (open/closed)."""
+    stmt = select(positions_table)
+    if status is not None:
+        stmt = stmt.where(positions_table.c.status == status)
+    rows = (
+        await session.execute(stmt.order_by(positions_table.c.created_at.desc()))
+    ).mappings().all()
+    return [_position_from_row(r) for r in rows]
+
+
+async def settle_position(
+    session: AsyncSession,
+    position_id: str,
+    *,
+    outcome: int,
+    pnl: Decimal,
+    resolved_at: datetime,
+) -> None:
+    """Close a resolved position: record its realized outcome + P&L (idempotent re-runs are
+    avoided by the caller, which only settles ``status='open'`` rows)."""
+    await session.execute(
+        update(positions_table)
+        .where(positions_table.c.id == position_id)
+        .values(status="closed", outcome=outcome, pnl=pnl, resolved_at=resolved_at)
+    )
 
 
 async def load_calibration(

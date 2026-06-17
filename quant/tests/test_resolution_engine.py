@@ -124,6 +124,59 @@ async def test_resolved_market_without_a_prediction_is_skipped(monkeypatch):
     assert result.checked == 1 and result.journaled == 0
 
 
+# --- position settlement ----------------------------------------------------
+
+
+def _position(pid, cid, side="yes", entry="0.40", stake="50"):
+    from app.models.position import Position
+
+    return Position(
+        id=pid, created_at=AT, market_id="m1", condition_id=cid, strategy="extreme_correction",
+        side=side, entry_price=Decimal(entry), stake_usd=Decimal(stake),
+        shares=Decimal(stake) / Decimal(entry), status="open",
+    )
+
+
+async def test_settles_open_directional_position_on_resolution(monkeypatch):
+    settled: list[dict] = []
+
+    async def load_positions(session, *, status=None):
+        return [_position("p1", "c1", side="yes")]
+
+    async def settle_position(session, position_id, *, outcome, pnl, resolved_at):
+        settled.append({"id": position_id, "outcome": outcome, "pnl": pnl})
+
+    monkeypatch.setattr(store, "load_positions", load_positions)
+    monkeypatch.setattr(store, "settle_position", settle_position)
+    gamma = FakeGamma([_resolved("c1", ["1", "0"])])  # YES won
+    result = await resolution_engine.run_position_settlement_once(
+        gamma, fake_sessionmaker, Settings(), now=lambda: AT
+    )
+    assert result.settled == 1
+    # YES bet at 0.40 for $50 won -> profit_if_win = 50*(1-0.40)/0.40 = 75.
+    assert settled[0]["outcome"] == 1
+    assert settled[0]["pnl"] == Decimal("75")
+
+
+async def test_settlement_skips_unresolved_and_arb_positions(monkeypatch):
+    settled: list[str] = []
+
+    async def load_positions(session, *, status=None):
+        return [_position("p1", "c1", side="set"), _position("p2", "c2", side="yes")]
+
+    async def settle_position(session, position_id, *, outcome, pnl, resolved_at):
+        settled.append(position_id)
+
+    monkeypatch.setattr(store, "load_positions", load_positions)
+    monkeypatch.setattr(store, "settle_position", settle_position)
+    # c2 has no resolution row -> nothing to settle; the 'set' position is never directional.
+    gamma = FakeGamma([])
+    result = await resolution_engine.run_position_settlement_once(
+        gamma, fake_sessionmaker, Settings(), now=lambda: AT
+    )
+    assert result.settled == 0 and settled == []
+
+
 # --- the calibration -> live Kelly wiring -----------------------------------
 
 async def test_effective_frac_falls_back_on_empty_journal(monkeypatch):

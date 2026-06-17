@@ -20,6 +20,7 @@ from app.math.profit import (
     prob_of_loss,
     profit_if_loss,
     profit_if_win,
+    settled_pnl,
     shares,
 )
 from app.models.backtest import BetCandidate
@@ -130,6 +131,32 @@ def test_mark_to_market_gain():
 def test_mark_to_market_loss():
     # 125 shares now worth 0.30 = $37.50, paid $50 -> -$12.50.
     assert mark_to_market(Decimal("125"), Decimal("0.30"), Decimal("50")) == Decimal("-12.50")
+
+
+# --- settled_pnl: directional resolution -------------------------------------
+
+
+def test_settled_pnl_yes_wins_on_outcome_1():
+    # buy YES at 0.40, $50: outcome 1 -> win -> profit_if_win = 75.
+    assert settled_pnl("yes", Decimal("50"), Decimal("0.40"), outcome=1) == Decimal("75")
+
+
+def test_settled_pnl_yes_loses_on_outcome_0():
+    assert settled_pnl("yes", Decimal("50"), Decimal("0.40"), outcome=0) == Decimal("-50")
+
+
+def test_settled_pnl_no_wins_on_outcome_0():
+    # buy NO at 0.40, $50: outcome 0 (NO resolves) -> win.
+    assert settled_pnl("no", Decimal("50"), Decimal("0.40"), outcome=0) == Decimal("75")
+
+
+def test_settled_pnl_no_loses_on_outcome_1():
+    assert settled_pnl("no", Decimal("50"), Decimal("0.40"), outcome=1) == Decimal("-50")
+
+
+def test_settled_pnl_rejects_bad_side():
+    with pytest.raises(ValueError):
+        settled_pnl("set", Decimal("50"), Decimal("0.40"), outcome=1)
 
 
 # --- cross-check against the backtest payoff oracle ---------------------------

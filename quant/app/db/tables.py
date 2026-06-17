@@ -142,3 +142,32 @@ user_config = sa.Table(
         "updated_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")
     ),
 )
+
+# Portfolio positions — one row per bet the operator placed (manually on Polymarket). A regular
+# table with a generated text PK. ``entry_price``/``stake_usd``/``shares``/``pnl`` are unbounded
+# NUMERIC (Decimal). ``outcome``/``pnl``/``resolved_at`` stay NULL until the market resolves and
+# the position is settled (``status='closed'``). Indexed by status and by market for settlement.
+positions = sa.Table(
+    "positions",
+    metadata,
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column(
+        "created_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.Column("market_id", sa.Text, nullable=False),
+    sa.Column("condition_id", sa.Text, nullable=False),
+    sa.Column("strategy", sa.Text, nullable=False),
+    sa.Column("side", sa.Text, nullable=False),  # yes / no / set
+    sa.Column("entry_price", sa.Numeric, nullable=False),  # all-in price paid per share
+    sa.Column("stake_usd", sa.Numeric, nullable=False),
+    sa.Column("shares", sa.Numeric, nullable=False),
+    sa.Column("status", sa.Text, nullable=False, server_default=sa.text("'open'")),
+    sa.Column("outcome", sa.SmallInteger, nullable=True),
+    sa.Column("pnl", sa.Numeric, nullable=True),
+    sa.Column("resolved_at", sa.TIMESTAMP(timezone=True), nullable=True),
+    sa.Column("signal_id", sa.Text, nullable=True),
+    sa.CheckConstraint("outcome IS NULL OR outcome IN (0, 1)", name="ck_positions_outcome"),
+)
+
+sa.Index("ix_positions_status", positions.c.status)
+sa.Index("ix_positions_condition", positions.c.condition_id)

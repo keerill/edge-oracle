@@ -89,6 +89,19 @@ def arb_locked_profit(net_edge: Decimal, set_size: Decimal) -> Decimal:
     return net_edge * set_size
 
 
+def settled_pnl(side: str, stake: Decimal, ask: Decimal, outcome: int) -> Decimal:
+    """Realized $ P&L of a resolved directional position. ``side`` is the token you bought
+    (``"yes"``/``"no"``); ``outcome`` is the market's YES result (1 = YES, 0 = NO). A YES bet
+    wins on outcome 1, a NO bet on outcome 0 — a win pays ``profit_if_win``, a loss ``-stake``.
+    Mirrors the directional branch of :func:`app.math.backtest.realized_pnl`."""
+    if side not in ("yes", "no"):
+        raise ValueError(f"side must be 'yes' or 'no', got {side!r}")
+    if outcome not in (0, 1):
+        raise ValueError(f"outcome must be 0 or 1, got {outcome}")
+    won = (outcome == 1) if side == "yes" else (outcome == 0)
+    return profit_if_win(stake, ask) if won else profit_if_loss(stake)
+
+
 def mark_to_market(share_count: Decimal, current_mid: Decimal, stake: Decimal) -> Decimal:
     """Unrealized P&L of an open position: ``shares * current_mid - stake``.
 

@@ -1187,6 +1187,69 @@ Phase 4 (signer security core: policy + EIP-712 crypto + approval, против 
   E2E → capped mainnet-канарейка за `EDGE_EXEC_ENABLED` + лимиты капитала. **Внешние доступы и
   необратимые денежные решения** — вне автономной части.
 
+## Slice: Personalization layer — $-earnings, risk, config, portfolio  ✅ done (2026-06-17)
+
+The personal-advisor slice the operator asked for: "how much will I earn, what's the risk,
+filter the safest, my bankroll, track what I placed." Advisor-only (no execution). Built in
+10 small slices (A–J), each tested + committed on `feat/advisor-loop-and-ops`.
+
+**Money-math decisions (non-negotiable, see CLAUDE.md):**
+- New pure module `quant/app/math/profit.py` is the dollar view; its win/loss payoff is
+  **cross-checked in tests against `math/backtest.py::realized_pnl`**, so "expected earnings"
+  on the dashboard and realized P&L in the replay can never drift.
+- EV cost basis is the **all-in `threshold`** (`m + half_spread + slippage + gas`), matching the
+  backtest fill — NOT the displayed `edge` price. `ev_usd` uses mean `p`; `ev_usd_conservative`
+  uses the gated CI lower bound `p_lo` (clamped to [0,1]).
+- Formulas: `shares = stake/ask`; `profit_if_win = stake*(1-ask)/ask`; `profit_if_loss = -stake`;
+  `expected_value = p*profit_if_win - (1-p)*stake`; `prob_of_loss = 1-p`; arb locked profit =
+  `net_edge*set_size`; `settled_pnl(side,stake,ask,outcome)` mirrors the directional payoff;
+  `mark_to_market = shares*current_mid - stake`.
+- **Only set-arb is risk-free** — surfaced explicitly (risk-free badge, `prob_of_loss=0`);
+  everything else is +EV with an honest `prob_of_loss` and win/loss $ spread.
+
+**Backend (quant):**
+- A: `math/profit.py` + `tests/test_profit.py` (24 worked examples).
+- B: `Economics` model on `AdvisedSignal`; `advisor/view.py` fills it for directional + arb.
+- C: `advisor/ranking.py` (safety tiers: arb→0, gate-passing directional→1, rest→2);
+  `GET /signals` gains `sort=net_edge|safety`, `safe_only`, `min_net_edge`.
+- D: `user_config` table + migration `0006`, `models/config.py::UserConfig` (env-defaulted,
+  range-validated), store `load/upsert_user_config`, `GET/PUT /config`. Signals now size off the
+  persisted config (bankroll, kelly_frac base, kelly_cap); `?bankroll=` stays an override.
+- E: `positions` table + migration `0007`, `models/position.py`, store
+  `insert/load/settle_position`, `POST/GET /positions` (live unrealized P&L + totals).
+  Resolution-watcher gains `run_position_settlement_once` (idempotent, directional only).
+
+**Web (Next.js):**
+- F: `EconomicsSchema` on the signal; new `config.ts`/`position.ts` schemas; client gains
+  `SignalsQuery`, `get/updateConfig`, `get/createPosition` (+ POST/PUT helper); BFF
+  `/api/config`, `/api/positions`.
+- G: Signals table swaps raw `p` for **Expected $** + **Loss risk** columns; detail page gains an
+  Earnings & risk card.
+- H: home page rewritten — live "best bets, safest first" (`safe_only&sort=safety`), real stats
+  (bankroll-at-risk), SSE-merged. AppShell nav: Portfolio + Settings.
+- I: `/settings` page — bankroll input + fractional-Kelly / cap / corr-cap / max-loss-prob
+  sliders (`useConfig` hook); saving re-sizes every recommendation.
+- J: `/portfolio` page — positions table with live/realized P&L + totals; `RecordBetForm`
+  (POST, prefilled from a signal's "Track this bet" deep-link).
+
+**Files added:** `quant/app/math/profit.py`, `quant/app/advisor/ranking.py`,
+`quant/app/models/config.py`, `quant/app/models/position.py`, `quant/app/api/config.py`,
+`quant/app/api/positions.py`, `quant/alembic/versions/0006_user_config.py`, `0007_positions.py`,
+and tests; `web/src/lib/schemas/{config,position}.ts`, `web/src/lib/useConfig.ts`,
+`web/src/app/{settings,portfolio}/*`, `web/src/app/api/{config,positions}/route.ts`.
+**Files modified:** `quant/app/{models/advisor,advisor/view,api/signals,ingestion/store,
+ingestion/resolution_engine,db/tables,main}.py`; `web/src/lib/{schemas/signal,api/client,format}.ts`,
+`web/src/app/{page,signals/SignalsTable,signals/[id]/page}.tsx`, `web/src/components/AppShell.tsx`.
+
+**Verification:** `cd quant && uv run pytest -q` → 359 passed (with `EDGE_TEST_DATABASE_URL`,
+0 skips); `uv run ruff check app tests` clean; `alembic upgrade head` applies 0006+0007.
+`cd web && pnpm test` → 79 passed; `tsc --noEmit` clean; `pnpm build` passes for all routes
+(`/portfolio`, `/settings`, `/api/config`, `/api/positions`).
+
+**Next (Part 2 — semi-auto execution, deferred):** executor Phases 5–7 (testnet dry-run relay →
+approval UI → mainnet canary behind `EDGE_EXEC_ENABLED` + human sign-off). Real money/irreversible
+— gather custody + limits requirements first.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

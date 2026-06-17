@@ -709,6 +709,401 @@ tree to re-implement; this confirms it still works end-to-end):
 - **Tidied:** added `.playwright-mcp/`, `*.png` (verification screenshots), and the generated
   `quant/demo_resolutions.json` to `.gitignore` — none are source.
 
+## Slice: Execution module — security architecture + pure core (Phases 1–3)  ✅ done (2026-06-17)
+
+First slice of the long-deferred **execution module**: an ISOLATED service that will (in later,
+separately-gated phases) place trades on Polymarket/Polygon. **Security architecture & threat
+model came first** (plan approved before any code; a Plan agent designed the architecture and an
+independent security-reviewer agent built the STRIDE/attack-tree threat model). This slice is the
+**pure core only — ZERO keys, ZERO network, ZERO chain**: the intent model + canonical hashing,
+the circuit-breaker predicates, the read-side advisor contract, and the persistence/audit schema.
+No signer, no relay, no KMS, no signing code. Decisions locked with the user: **AWS KMS**
+(secp256k1) for the future signer; **Gnosis Safe (M-of-N)** cold custody + small hot float;
+pure-core-first build sequence. Full plan: `~/.claude/plans/read-claude-md-progress-md-scalable-meteor.md`.
+
+### What's done (new top-level `executor/` service — sibling of `quant/`, never imports it)
+- **Isolation by construction** (`executor/`): own `uv` project, own package, own Alembic chain,
+  own database (`edge_exec`, separate from the advisor's `edge`). **Zero `import quant`** — it
+  consumes advisor output as JSON over Redis, validated by its own boundary model (like `web/`'s
+  Zod). `EDGE_EXEC_ENABLED` defaults **false** (the hard CLAUDE.md gate).
+- **Intent model + tamper-evident hashing** (`app/models/intent.py`): frozen, `Decimal`-native
+  `Intent` (the only thing the future signer signs) + `IntentEnvelope`. `compute_intent_hash` =
+  SHA-256 of canonical `json.dumps(model_dump(mode="json"), sort_keys=True)` — float-free and
+  order-independent, so executor and signer hash byte-for-byte. `IntentEnvelope.seal/verify` is
+  the binding the signer re-checks to reject a tampered intent at the trust boundary.
+- **Pure intent forming** (`app/orchestrator/intents.py`): `intent_from_signal` maps a
+  **directional** (`extreme_correction` buy_yes/buy_no) `AdvisedSignalView` to a `clob_order`
+  Intent — `ask = m + half_spread`, `size = notional/ask`, `max_price = min(1, ask + slippage)`.
+  **Set-arb is deliberately NOT formed** here (see money-math note). No I/O, no clock (ids/nonce/
+  times injected).
+- **Circuit breakers** (`app/breakers/checks.py`): pure predicates over `(intent, state, limits)`
+  — master switch, per-trade cap, slippage cap, contract/spender allowlist, rate limit (count
+  **and** cumulative notional), hot-wallet cap (bounded by both the cap and available balance).
+  `evaluate` aggregates all breaches. State is read from durable storage, never executor memory.
+- **Read-side advisor contract** (`app/models/advised.py`): `AdvisedSignalView` mirrors
+  `AdvisedSignal` (money as JSON strings → `Decimal`), `extra="ignore"` for additive drift.
+- **Config** (`app/config.py`): `EDGE_EXEC_*` `Settings` (mirrors `quant/app/config.py`), Decimal
+  money knobs, csv allowlist props, `breaker_limits()` projection. No secrets (future KMS handle is
+  a non-secret id).
+- **Persistence** (`app/db/tables.py` + `store.py` + Alembic `0001_exec_init`): `exec_intents`
+  (append-only), `exec_audit` (insert-only spine), `exec_approvals` (stores only the token **hash**),
+  `exec_nonces` (atomic `FOR UPDATE` allocator), `exec_allowlist`, `exec_breaker_counters`. All
+  money unbounded `NUMERIC`↔`Decimal`. **Nothing stores keys/seeds/raw tokens/KMS creds.**
+
+### Verified
+- `cd executor && uv run pytest -q` → **32 passed, 5 skipped** (offline; store tests skip without a DB):
+  intent hash determinism + JSON round-trip + tamper detection + frozen; directional mapping
+  worked example (m 0.20 / half_spread 0.05 → ask 0.25, notional 100 → size 400, max_price 0.30;
+  max_price clamps to 1); arb/no-gate rejected; every breaker boundary (caps inclusive, rate
+  count+cumulative, allowlist, hot-cap vs balance, multi-failure aggregate); config default-off +
+  allowlist parse; golden-JSON contract parse + extra-field tolerance.
+- With `EDGE_EXEC_TEST_DATABASE_URL=…edge_exec_test` → **37 passed** (+7 DB-gated store: intent
+  Decimal↔NUMERIC round-trip, append-only ordered audit trail, **monotonic/unique nonce allocator**,
+  allowlist round-trip, approval stores only the token hash). **Mutation-tested** the nonce
+  allocator (broke the increment → the test went red → reverted) to prove the DB tests have teeth.
+- `EDGE_EXEC_DATABASE_URL=…edge_exec uv run alembic upgrade head` → all six `exec_*` tables created;
+  `downgrade base` → `upgrade head` clean round-trip.
+- **Isolation:** **zero `import quant`** from `executor/` (only docstring mentions); secret grep
+  finds no private-key/seed/signing code (only the schema docstring asserting none are stored). The
+  advisor suite is untouched and green (`cd quant && … pytest -q` → **245 passed** with the test DB).
+
+### Money-math / correctness decisions (carry forward)
+- **Intent hash is float-free & deterministic**: canonical serialization renders every `Decimal`
+  as its exact string and `sort_keys` removes field-order dependence — so the (future) signer
+  recomputes an identical hash from the received JSON. The Decimal→JSON-string wire contract is
+  load-bearing here, not cosmetic. (Numerically-equal-but-differently-written decimals are NOT
+  collapsed — round-trip stability through JSON is the property that matters; we deliberately do
+  not `normalize()` to avoid exponent-format surprises.)
+- **Set-arb intent-forming is deferred** (and the test pins it raises): `advise()` collapses the two
+  arb legs into one `market_price` (set cost) and drops the per-leg VWAPs, so a correct, MEV-safe
+  two-leg priced order can't be rebuilt from the live stream. Arb execution pairs with the on-chain
+  CTF Split/Merge/Redeem legs + the relay (a later phase that consumes the richer signal).
+- **Breakers are inclusive at the boundary** (`<=`); rate limiting covers **cumulative notional**
+  (not just count) to defeat the split-into-many-small-trades bypass; a single trade is bounded by
+  **both** the hot-float ceiling and the available balance.
+
+### Decisions locked this slice
+- **`executor/` is a separate service, not a `quant/` subpackage** — CLAUDE.md independence; the
+  key-free advisor can never reach the signer/wallet by construction (separate process/deploy/IAM).
+- **Signer enforces its OWN policy later** (the central threat-model finding: assume the executor
+  host is compromised — the signer must default-deny, re-validate the intent hash, and hold the
+  recipient/contract/method allowlist + caps independently). NONE of that is built this slice; it's
+  Phase 4 (signer vs Polygon Amoy testnet via AWS KMS) — re-planned/approved before any signing code.
+- **Breaker state is durable + signer-owned** (DB, not executor memory) so a restart can't reset
+  the rate-limit counters (a classic bypass).
+- No new deps (reuses pydantic/pydantic-settings/sqlalchemy/asyncpg/alembic — the advisor's stack).
+- Dev/test dbs `edge_exec` / `edge_exec_test` created in the existing compose Postgres.
+
+### Open questions / next phases (NOT this slice — each re-planned + approved first)
+- **Phase 4 — signer service (AWS KMS, Polygon Amoy testnet):** EIP-712 + EIP-1559 digest build,
+  KMS `(r,s,v)` reconstruction (round-trip recovered address in tests), default-deny policy +
+  allowlist + caps + approval-token re-verification. No mainnet key.
+- **Phase 0 research before mainnet:** confirm a real Polygon private-inclusion relay + its trust
+  model + a tighter-slippage public fallback; pin exact current Polymarket contract addresses; the
+  Gnosis Safe transaction-guard for on-chain allowlisting.
+- **Phase 5–7:** relay client (dry-run on testnet) → approval workflow + web UI (single-use TTL
+  token bound to the intent hash, decoded-intent rendering) → testnet E2E → capped mainnet canary
+  with the Safe cold split live, behind `EDGE_EXEC_ENABLED=true` and explicit human sign-off.
+- **Carry-forwards:** nonce recovery path for stuck/gapped txs (Phase 4); exact-allowance vs arb
+  speed (bounded per-cycle approve, never infinite); CLOB orders bypass the relay (off-chain
+  EIP-712) so MEV protection covers only the CTF on-chain legs.
+
+## Slice: Trades ingestion (Data API /trades → trades hypertable)  ✅ done (2026-06-17)
+
+Roadmap Трек A1 (фундамент для fair-value + реального P&L): типизированный клиент Data API
+`/trades`, чистый raw→canonical transform, `trades` hypertable + миграция, store-функции и
+standalone-поллер. **Ingestion only** — никаких сигналов/денежной математики поверх; trade prints
+это reference-данные (компаньон к `quotes`).
+
+### What's done
+- **Untrusted boundary** (`app/polymarket/schemas.py`): `RawTrade` (`asset`/`conditionId`/`side`/
+  `size`/`price`/`timestamp`/`transactionHash`, `extra="ignore"`). **Деньги приходят JSON-числами**
+  (напр. `price:0.8099999954639995`), поэтому клиент декодит ответ с `parse_float=str` — точный
+  wire-литерал сохраняется строкой, **float не входит в денежный путь** (расширение правила CLOB).
+- **HTTP** (`app/polymarket/http.py`): `request_json` получил опц. `parse_float` (форвардится в
+  `json.loads`); дефолтный быстрый путь `response.json()` не тронут.
+- **Data API клиент** (`app/polymarket/data_client.py`): `DataClient.get_trades(condition_id, limit)`
+  — gotcha: query-параметр зовётся `market`, но берёт **condition id**.
+- **Pure transform** (`app/ingestion/trades_transform.py`): `trade_from_raw` — единственная точка
+  коэрции trade-print строк в `Decimal` (из строки, не из float), unix→UTC datetime.
+- **Canonical model** (`app/models/trade.py`): frozen `Decimal`-native `Trade`
+  (time/token_id/market_id/price/size/taker_side/trade_id).
+- **Schema**: `trades` hypertable (`app/db/tables.py` + Alembic `0005_trades`, по образцу `quotes`;
+  unbounded NUMERIC; индекс `(token_id, time desc)`; без PK — ограничение TimescaleDB).
+- **Store** (`app/ingestion/store.py`): `insert_trades` (batch) + `load_trades` (time-ordered,
+  опц. token-фильтр и half-open `[start,end)` окно) — по образцу quotes.
+- **Поллер** (`app/ingestion/trades_engine.py`): `run_trades_scan_once` (timing-free seam) грузит
+  tracked-вселенную, фетчит трейды per condition_id, маппит каждый print на рынок (чужие токены
+  отбрасываются), батч-инсертит; per-market изоляция. Дедуп между циклами через инжектируемый
+  `since`-курсор (token→last seen time); `run_trades_poller` + CLI
+  `python -m app.ingestion.trades_engine [once|loop]`. Кноб `EDGE_TRADES_LIMIT`, `EDGE_DATA_BASE_URL`.
+
+### Verified
+- `cd quant && uv run pytest -q` → **255 passed** (было 245; **+10**: 3 transform worked-example
+  incl. exact-Decimal/не-float-mediated, 2 data-client request/parse, 2 DB-gated store
+  round-trip/фильтр/окно, 3 engine orchestration: маппинг/чужие токены/per-market изоляция/`since`-дедуп).
+- `uv run alembic upgrade head` → `0004_calibration → 0005_trades`; `trades` hypertable подтверждён
+  через `timescaledb_information.hypertables`.
+- **Live smoke** `python -m app.ingestion.trades_engine once` (dev DB + реальный Data API) → 11
+  tracked-рынков, **500 трейдов** записано; в БД — точные Decimal-цены (0.08 / 0.92, без float-
+  артефактов), 10 distinct токенов.
+
+### Money-math / correctness decisions (carry forward)
+- **Trade price/size приходят JSON-числами** (не строками, как у CLOB) — декодим с `parse_float=str`,
+  храним точный литерал, коэрсим в `Decimal` один раз в transform. Float не касается денег.
+- **Дедуп — carry-forward**: `since`-курсор снимает повтор между циклами в рамках процесса; restart-
+  durable high-water + same-second дедуп отложены (`trade_id` = tx hash, не уникален на fill; таблица
+  append-only reference). Под нагрузкой одной секунды граничный трейд может продублироваться.
+- `market_id` резолвится поллером (мы фетчим per condition_id, так что рынок известен); чужие токены
+  в ответе отбрасываются защитно.
+
+## Slice: Category resolution (Gamma event tags → fee category)  ✅ done (2026-06-17)
+
+Roadmap Трек A2: Gamma `/markets` почти всегда без `category` (наблюдалось NULL), а fee-таблица
+(A3) на ней keyится. Резолвим категорию из тегов события. **Находка**: `/markets` НЕ отдаёт
+`events[].tags` (проверено 3 параметра), теги есть только в `/events` — поэтому категория
+доводится вторичным батч-запросом `/events?id=...` по выбранной вселенной.
+
+### What's done
+- **Boundary** (`app/polymarket/schemas.py`): `RawGammaTag` (id/label/slug, `extra="ignore"`);
+  `RawGammaEventRef.tags: list[RawGammaTag] = []` (пусто на пути `/markets`).
+- **Pure logic** (`app/ingestion/transform.py`): `TAG_CATEGORY` словарь slug/label→каноническая
+  категория (crypto/politics/sports/finance/economics/geopolitical; топиковые теги маппятся,
+  generic — `all`/`pop-culture`/`exchange` — дают `None`); `category_from_tags` (первый
+  смапленный тег по порядку); `derive_category` (явная `category` нормализованная побеждает, иначе
+  из тегов событий, иначе `None`). `market_from_raw` теперь зовёт `derive_category`.
+- **Client** (`app/polymarket/gamma_client.py`): `fetch_event_tags(event_ids)` → `event_id→tags`
+  через батч `/events?id=...&id=...` (dedupe ids; малформед-событие пропускается, не фатально).
+- **Discovery enrichment** (`app/ingestion/scanner.py`): `_resolve_categories` — для выбранных
+  рынков без категории один батч-фетч тегов и `model_copy(category=…)`; решение чистое
+  (`category_from_tags`), фетч best-effort (сбой → дефолты, не падаем).
+
+### Verified
+- `cd quant && uv run pytest -q` → **267 passed** (было 255; **+12**: 8 pure category worked-
+  examples — топик/generic/first-wins/label-fallback/explicit-wins/derive/none + market_from_raw
+  интеграция; 2 client request/parse incl. repeated `id` param; 3 enrichment — только
+  некатегоризованные, без фетча когда не нужно, fallback при сбое). Без регрессий.
+- **Live smoke** `discover_universe` (EDGE_TOP_N=8, реальный Gamma) → 8 рынков, **все
+  категоризованы** (sports×3 / politics×3 / geopolitical / finance), **ноль `None`** — раньше все
+  были бы `None`. Резолв из реальных `/events` тегов работает end-to-end.
+
+### Decisions locked this slice
+- **Теги — из `/events`, не `/markets`** (ограничение Gamma): категория доводится вторичным
+  батч-запросом по уже выбранной (~top_n) вселенной — дёшево (один вызов на discovery-цикл), не
+  N+1. Generic-теги → `None` → fee-таблица применит самый консервативный дефолт (корректно).
+- Словарь `TAG_CATEGORY` расширяемый; неизвестный тег безопасно даёт `None`.
+
+## Slice: Per-category taker fee table (math/fees.py)  ✅ done (2026-06-17)
+
+Roadmap Трек A3 (SPEC §6): чистая денежная математика комиссии по категории — вход для
+будущего fair-value gate. Пара к A2 (category → fee). **Math + tests only** — ещё не вшито в
+gate/sizing (как и прочая math-модуль перед своим scanner'ом; сейчас gate использует
+gas+slippage кнобы).
+
+### What's done
+- **Pure math** (`app/math/fees.py`, Decimal-native): `phi(price, category)` =
+  `feeRate·(p(1−p))^exp` (per-dollar ставка, пик при p=0.5, ноль на краях); `fee_per_share =
+  price·phi`. `FeeParams` + `FEE_TABLE` (crypto/politics/finance/sports/economics/geopolitical);
+  `params_for` case-insensitive, **unknown/None → консервативный crypto-дефолт** (никогда не
+  недооцениваем стоимость). Единственный нерациональный шаг — `exp=0.5` sqrt для economics —
+  в фикс. Decimal-контексте (prec=50), без float.
+- Ставки сверены с опубликованными peak-rate каждой категории.
+
+### Verified
+- `cd quant && uv run pytest tests/test_fees.py -q` → **13 passed** (peak φ(0.5) по таблице:
+  crypto 1.8% / politics 1.0% / finance 1.0% / sports 0.75% / economics 1.5% / geopolitical 0;
+  unknown==crypto; case-insensitive; φ пикует на 0.5 и симметрична; worked fee_per_share
+  0.5→0.009 / 0.4→0.006912 / economics 0.5→0.0075; края→0; out-of-range price → ValueError).
+- `cd quant && uv run pytest -q` → **280 passed** (было 267; +13; без регрессий).
+
+### Decisions locked this slice
+- **unknown/None → crypto rate** (самый консервативный) — uncategorized рынок не недооценивается.
+- Поддержаны только опубликованные экспоненты `1` и `0.5` (иначе ValueError); таблица — единый
+  источник, расширяется при изменении расписания комиссий Polymarket.
+
+## Slice: Fair-value model + CI lower bound (math/fair_value.py)  ✅ done (2026-06-17)
+
+Roadmap Трек A4: дать направленным сигналам реальную `p` + консервативную `p_lo` (вход в готовые
+`edge_gate`/`position_size`). Выбран подход (с пользователем): **TWAP midpoint + дисперсионная
+нижняя граница**. **Math only** — ещё не вшито в живой directional-scanner/sizing (это A6 /
+sizing-wiring); конкретная модель калибруется позже по A5.
+
+### What's done
+- **Pure math** (`app/math/fair_value.py`, Decimal-native): `estimate_fair_value(observations,
+  *, as_of, params)` → `FairValueEstimate{p_hat, p_lo, sigma, n}` или `None` при нехватке данных.
+  `p_hat` = dwell-time-weighted mean(midpoint) (каждый midpoint «держится» до следующего тика,
+  последний — до `as_of`); `sigma` = time-weighted stdev; `p_lo = clamp(p_hat − k·sigma, 0, 1)`.
+  `FairValueObservation{time, midpoint}` (декаплинг от quotes), `FairValueParams{k=2,
+  min_observations=2}`.
+- **Без float в деньгах**: веса — целые микросекунды (точные int из часов), midpoint — Decimal;
+  единственный иррациональный шаг (stdev sqrt) в фикс. контексте prec=50. Вырожденный случай
+  (все на один момент, нулевой dwell) → равновесное среднее.
+
+### Verified
+- `cd quant && uv run pytest tests/test_fair_value.py -q` → **8 passed** (worked examples: равный
+  dwell → TWAP 0.50 / σ 0.10 / p_lo 0.30; неравный dwell → взвешивание по времени, σ 0.1732;
+  константа → σ=0; p_lo клампится в 0; <min_observations → None; configurable min; as_of до
+  последнего тика → ValueError; вырожденный same-timestamp → simple mean).
+- `cd quant && uv run pytest -q` → **288 passed** (было 280; +8; без регрессий).
+
+### Decisions locked this slice
+- **TWAP + k·σ нижняя граница** как первый слой (по решению пользователя): просто, консервативно,
+  опирается на уже хранимые quotes (+ trades VWAP из A1 при желании). `p_hat` = рыночный консенсус,
+  сглаженный по времени; `p_lo` — то, что тестирует gate (CLAUDE.md: size на p, gate на нижней).
+- **None при нехватке данных** (никогда не фабрикуем точечную оценку). Калибровка/замена модели —
+  после A5 (resolution journal).
+
+## Slice: Resolution-watcher → calibration → live Kelly  ✅ done (2026-06-17)
+
+Roadmap Трек A5: замыкает петлю честности. Детектим разрешившиеся отслеживаемые рынки на Gamma,
+матчим к последней направленной оценке, пишем строку в `calibration` journal, и — главное —
+**подаём усохшую (shrink-only) Kelly-долю из калибровки в живой sizing** (раньше journal был
+display-only на странице Calibration).
+
+### What's done
+- **Pure resolution** (`app/ingestion/resolution.py`): `resolved_outcome(outcomes, prices)` —
+  realized YES-исход бинарного Yes/No рынка (1/0/None; definitive только при ценах {"0","1"},
+  yes-индекс уважается даже при перестановке); `calibration_from_resolution(signal, outcome, at)`
+  → `CalibrationRecord` (estimate=`fair_value`, price=`price`). Только `extreme_correction` (несёт
+  вероятность); arb/longshot пропускаются.
+- **Client** (`app/polymarket/gamma_client.py`): `fetch_resolutions(condition_ids)` →
+  `/markets?closed=true&condition_ids=...` (разрешённые среди отслеживаемых; pending просто
+  отсутствуют). Подтверждено на реальном API.
+- **Watcher** (`app/ingestion/resolution_engine.py`): `run_resolution_scan_once` (seam) — грузит
+  вселенную + последний directional-сигнал на рынок + уже-записанные market_id, фетчит резолюции,
+  пишет calibration для каждого нового. **Идемпотентно** (повторный прогон не дублирует). CLI.
+- **Live Kelly wiring** (`app/api/signals.py`): `effective_kelly_frac(session, settings)` —
+  `summarize(journal, base_frac=kelly_frac).kelly.adjusted_frac` или фолбэк на `kelly_frac` при
+  пустом journal / отсутствии high-confidence доказательств. `_enrich` теперь сайзит на этой доле.
+  **Shrink-only** (≤ kelly_frac): калибровка может только снизить риск.
+
+### Verified
+- `cd quant && uv run pytest -q` → **301 passed** (было 288; +13: 6 pure resolution worked-examples
+  — yes/no/flip/pending/non-binary/record; 3 engine orchestration — journal-with-prediction /
+  already-journaled-skip / no-prediction-skip; 2 wiring — пустой journal→fallback, overconfident
+  10×p=0.8 6 wins → frac 0.25→**0.1875**; 2 client request/parse). Без регрессий.
+
+### Money-math / correctness decisions (carry forward)
+- **Live Kelly = калибровочно-усохшая**: `adjusted_frac ≤ kelly_frac` всегда (shrink-only,
+  переиспользует `suggest_kelly_fraction`). Пустой journal / нет high-conf → конфигурный `kelly_frac`.
+- **Идемпотентность через journaled-set** (market_id уже в `calibration` для стратегии → пропуск);
+  `calibration` append-only без уникального ключа — повторная запись исключена на уровне воркера.
+- Только `extreme_correction` журналируется (несёт `fair_value`); arb risk-free, longshot без `p`.
+
+### Decisions locked this slice
+- Резолюция из `closed=true&condition_ids=` (pending рынки просто не возвращаются — не нужен
+  отдельный «recently-resolved» источник). Outcome из `outcomePrices` {"0","1"}.
+- Воркер — отдельный CLI `python -m app.ingestion.resolution_engine` (зеркало signals/engine).
+
+## Slice: Price-signal live scanner (longshot + correction)  ✅ done (2026-06-17)
+
+Roadmap Трек A6: завести две чистые price-функции (`math/longshot` + `math/correction`) в живой
+скан. Раньше они были math+persistence-only (без scanner'а); теперь читают последний YES-midpoint
+из `quotes` и персистят сигналы на цикле. Сетевых вызовов нет — потребляет квоты ingestion-поллера.
+
+### What's done
+- **Scanner** (`app/signals/price_engine.py`, зеркало `signals/engine.py`): `run_price_scan_once`
+  (seam) — грузит вселенную + `load_latest_quotes` по YES-токенам, на каждый рынок гонит
+  `evaluate_extreme_correction` + `evaluate_favourite_longshot` по midpoint, персистит двумя
+  **гомогенными** батчами (`insert_signals` компилирует колонки из первой строки). `run_price_poller`
+  + CLI `python -m app.signals.price_engine [once|loop]`; метрики `SIGNALS{strategy,scan}`.
+- **Config knobs** (`app/config.py`): `EDGE_LONGSHOT_{LO,HI}`, `EDGE_FAVOURITE_{LO,HI}`,
+  `EDGE_CORRECTION_{LO,HI,NUDGE_MIN,NUDGE_MAX}` (Decimal) → маппятся в `LongshotParams`/
+  `CorrectionParams` (как `_params` для арбитража).
+
+### Verified
+- `cd quant && uv run pytest -q` → **305 passed** (было 301; +4 orchestration: deep-longshot
+  midpoint 0.10 → оба сигнала; mid-range 0.50 → ничего; favourite 0.80 → только longshot;
+  отсутствующий midpoint → пропуск). Без регрессий. Pure band/nudge — в test_longshot/test_correction.
+
+### Decisions locked this slice
+- **Без сети**: scanner читает уже хранимые `quotes` (последний midpoint), не дёргает CLOB.
+- Каждая стратегия — свой батч `insert_signals` (требование гомогенности).
+- **Замена эвристического `fair_value` (correction) на TWAP-оценку A4** — осознанный follow-up
+  (меняет смысл персистируемого сигнала и источник `p_lo` в gate; требует решения по модели). Сейчас
+  correction остаётся на своём nudge-эвристике; A4-модель доступна как отдельный источник `p`.
+
+## Slice: Alert dedup/rate-limiting (A7, partial)  ✅ done (2026-06-17)
+
+Roadmap Трек A7: монитор перевыпускал один и тот же алерт каждый цикл, пока условие держится —
+шумно. Добавлен dedup/rate-limit. **Live equity feed для реального drawdown остаётся заблокирован
+отсутствием исполнения** (нет удерживаемых позиций — advisor-only); это Трек C. Заметка: после A5
+**calibration drift уже работает на реальных данных** (journal заполняется resolution-watcher'ом);
+backtest-drawdown остаётся на `EDGE_BACKTEST_RESOLUTIONS_PATH` до появления исполнения/позиций.
+
+### What's done
+- **`AlertDeduper`** (`app/observability/alert_dedup.py`, pure+stateful): `filter(alerts, now)` —
+  повтор того же `kind` публикуется только после `cooldown` с последнего emit; **re-arm** когда
+  условие исчезает (цикл без этого kind сбрасывает состояние → свежий пробой алертит сразу). Cooldown
+  меряется от последнего emit, не от последнего «виден».
+- **Wiring**: `run_monitor_once` принимает опц. `deduper`; `run_monitor` владеет одним экземпляром
+  через циклы. Кноб `EDGE_ALERT_COOLDOWN_S` (дефолт 3600).
+
+### Verified
+- `cd quant && uv run pytest -q` → **312 passed** (было 305; +7: 6 dedup worked-examples —
+  first-emit / suppress-within-cooldown / re-emit-after / clock-from-last-emit / cleared-re-arm /
+  distinct-kinds-independent; +1 monitor-loop интеграция: персистентный drawdown за 2 цикла →
+  публикуется один раз). Без регрессий.
+
+### Decisions locked this slice
+- **Real live-equity drawdown отложен до исполнения (Трек C)** — без позиций «реального P&L» не
+  существует; честно задокументировано, монитор остаётся на backtest-реплее для drawdown.
+- Dedup: один экземпляр на loop, состояние в памяти процесса (монитор — единственный продьюсер этих
+  двух алертов; durable-стейт не нужен).
+
+## Трек A (замкнуть петлю советника) — ЗАВЕРШЁН (A1–A7)
+A1 trades · A2 category · A3 fees · A4 fair-value · A5 resolution→calibration→live-Kelly ·
+A6 price-signal scanner · A7 alert dedup. Советник самодостаточен по данным/математике; реальный
+equity-feed (drawdown по факту) ждёт исполнения (Трек C). Сьют **245 → 312 passed** (+67 за сессию).
+
+## Slice: Production hardening — Docker + CI + API auth (Трек B: B1–B4)  ✅ done (2026-06-17)
+
+Roadmap Трек B (эксплуатация): контейнеризация, CI, и закрытие открытого quant API. Делается
+параллельно с A; B4(секреты) — предпосылка для Трека C.
+
+### B1 — Контейнеризация
+- **Dockerfiles**: `quant/Dockerfile` (multi-stage uv; дефолт — uvicorn, поллеры через
+  `command:`), `web/Dockerfile` (Next **standalone** через corepack pnpm@9.15.0, slim runner,
+  non-root), `executor/Dockerfile` (uv; pure-core, без сервера — заглушка до фаз signer/relay).
+  `+ .dockerignore` на каждый. `next.config.ts` → `output: "standalone"`.
+- **Full-stack compose** `infra/docker-compose.full.yml`: postgres+redis + one-shot `migrate` +
+  `quant-api` (healthcheck) + поллеры (`scanner`/`signals`/`price-signals`/`trades`/`monitor`) +
+  `web`. YAML-anchor общих env; `depends_on` по health/completed. **`docker compose config` →
+  VALID**; web env-имена (`QUANT_API_URL`/`REDIS_URL`) совпали с `lib/env.ts`. (Полная сборка
+  образов — в CI/локально с сетью; in-sandbox build base-pull завис, прерван — код проверен иначе.)
+
+### B2 — CI/CD
+- `.github/workflows/ci.yml`: 3 джобы — **quant** (postgres+redis services, uv sync, alembic
+  upgrade, pytest incl. DB-gated), **executor** (postgres service, pytest DB-gated), **web**
+  (node22 + corepack pnpm, `tsc --noEmit`, vitest, `next build`). **Без новых зависимостей.**
+  Линт (ruff) + coverage — отложены (новые dev-deps; CLAUDE.md требует согласования — см. ниже).
+
+### B3 — Auth + CORS + rate limit (закрыли открытый API)
+- **`app/api/security.py`**: `require_api_key` (при `EDGE_API_KEY` advisor-маршруты требуют
+  `X-API-Key`; `/health`,`/metrics` никогда не гейтятся), `RateLimiter` (per-IP sliding-window,
+  чистая логика), `cors_origins`. Wired в `main.py`: CORS-middleware (origins из
+  `EDGE_CORS_ORIGINS`), rate-limit middleware (при `EDGE_RATE_LIMIT_PER_MIN>0`), `require_api_key`
+  на роутеры. Web BFF (`lib/api/client.ts` + `env.ts`) шлёт `X-API-Key` из `QUANT_API_KEY` когда задан.
+- Кнобы: `EDGE_API_KEY` (секрет), `EDGE_CORS_ORIGINS`, `EDGE_RATE_LIMIT_PER_MIN`, `EDGE_ALERT_COOLDOWN_S`.
+
+### B4 — Секреты
+- Политика задокументирована (`quant/.env.example` + executor): **ни один секрет не коммитится**;
+  `EDGE_API_KEY`/`EDGE_SENTRY_DSN`/DB-creds/(будущие KMS) приходят из env, инжектятся secret-
+  менеджером (Vault/AWS SM/Doppler) в проде; `config.py` читает через pydantic-settings; `.env`
+  в `.gitignore`. (Реальная интеграция конкретного менеджера требует аккаунта — вне автономной части.)
+
+### Verified
+- `cd quant && uv run pytest -q` → **319 passed** (+7 security: rate-limit окно/per-key, auth
+  open/reject/accept, CORS csv). TestClient: `/signals` без ключа → **401** (короткое замыкание до
+  DB), `/health` → 200. `cd web && … tsc --noEmit` чисто; `… test` → **79 passed**. `docker compose
+  -f infra/docker-compose.full.yml config` → VALID.
+
+### Заблокировано (нужно решение/доступ — см. конец файла)
+- **B2-lint / B5 (coverage + e2e)**: новые dev-deps (ruff, pytest-cov, @playwright/test) — CLAUDE.md
+  требует согласования перед добавлением. Ждёт «да».
+- **Трек C (исполнение, Фазы 4–7)**: реальные AWS KMS / Polygon-Amoy ключ / private-relay +
+  лимиты капитала — внешние доступы и необратимые решения; автономно не делается.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

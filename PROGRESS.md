@@ -1335,6 +1335,39 @@ modified `executor/pyproject.toml`. **Verify:** `cd executor && uv run pytest -q
 **Still external (Phases 5b / 6-UI / 7):** live Polymarket CLOB submit (order schema + API creds);
 approval web UI; AWS KMS + Gnosis Safe + capped mainnet canary behind `EDGE_EXEC_ENABLED` + sign-off.
 
+## Slice: Execution Phase 5b — Polymarket CLOB order client (mock-HTTP)  ✅ done (2026-06-17)
+
+Route C (operator's choice): build the **full live-submission wire**, tested against mocked HTTP
+with **no network and no keys**. NOT yet called from the pipeline (`relay.submit` stays dry-run) —
+flipping it on is a creds-gated step. Schema sourced from the public py-clob-client docs; field-
+level specifics are configurable and flagged **verify-before-live**.
+
+- **`clob/amounts.py`** — money-critical 6-dp maker/taker math. BUY: `makerAmount=USDC=price·size`,
+  `takerAmount=tokens=size`; SELL inverse. Half-up rounding to 6 decimals, integer base units.
+- **`clob/order.py`** — build the CTF Exchange `Order` struct (salt/maker/signer/taker/tokenId/
+  amounts/expiration/nonce/feeRateBps/side/signatureType) + its EIP-712 typed data from an
+  `Intent` + `tokenId`; `signed_order_payload` for the POST body. `side` BUY/SELL enum (our buys →
+  BUY; tokenId selects YES/NO). `salt`/`nonce` injected.
+- **`signer/crypto.py`** — `LocalSigner.sign_eip712` signs arbitrary typed data (the order's domain
+  differs from the intent envelope's); a test proves the order signature recovers to the signer.
+- **`clob/auth.py`** — L2 HMAC headers: `base64url(HMAC_SHA256(base64url_decode(secret),
+  timestamp+method+path+body))`; reference-vector test. Header names default to the `POLY_*` form
+  (version-sensitive — verify).
+- **`clob/client.py`** — `place_order` via an **injected** `httpx.AsyncClient` (module imports
+  without httpx via `TYPE_CHECKING`; tests use `httpx.MockTransport`). `ClobError` on non-2xx.
+- **config** — `exchange_address`/`exchange_domain_name`/`exchange_domain_version`, `fee_rate_bps`,
+  `signature_type`, and `clob_api_key`/`secret`/`passphrase` (blank until supplied).
+
+**Files:** new `executor/app/clob/{__init__,amounts,order,auth,client}.py`,
+`executor/tests/test_clob.py`; modified `executor/app/config.py`, `executor/app/signer/crypto.py`.
+**Verify:** `cd executor && uv run pytest -q` → 103 passed (with exec DB), ruff clean.
+
+**To flip live (operator + verify):** supply a funded Polygon wallet key + Polymarket L2 API creds
+in `executor/.env`; resolve the outcome `tokenId` in intent-forming; promote `httpx` to a runtime
+dep; verify the header-name form / domain name / posted JSON against the live API; wire
+`relay.submit(dry_run=False)` → build order → `sign_eip712` → `place_order`; start with a tiny
+post-and-cancel. Then Phase 7 (AWS KMS + Gnosis Safe + capped mainnet canary + human sign-off).
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

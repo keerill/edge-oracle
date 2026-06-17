@@ -107,6 +107,7 @@ async def execute_signal(
             intent_id=intent_id,
             event="breaker_rejected",
             actor="system",
+            time=now,
             detail={"rejections": list(decision.rejections)},
         )
         return ExecutionResult(
@@ -123,12 +124,13 @@ async def execute_signal(
             intent_id=intent_id,
             event="pending_approval",
             actor="system",
+            time=now,
             detail={"mode": "require_approval_for_all"},
         )
         return ExecutionResult(intent_id=intent_id, status="pending_approval")
     if approval_valid:
         await store.append_audit(
-            session, intent_id=intent_id, event="approved", actor="human"
+            session, intent_id=intent_id, event="approved", actor="human", time=now
         )
 
     # Sign — the independent default-deny policy runs again inside sign_intent.
@@ -146,6 +148,7 @@ async def execute_signal(
             intent_id=intent_id,
             event="signer_rejected",
             actor="system",
+            time=now,
             detail={"reasons": list(result.rejected_reasons)},
         )
         return ExecutionResult(
@@ -156,6 +159,7 @@ async def execute_signal(
         intent_id=intent_id,
         event="signed",
         actor="system",
+        time=now,
         detail={"signer_address": result.signed.signer_address},
     )
 
@@ -166,6 +170,7 @@ async def execute_signal(
         intent_id=intent_id,
         event="submitted",
         actor="system",
+        time=now,
         tx_hash=submission.order_ref,
         detail={"dry_run": dry_run, "status": submission.status},
     )

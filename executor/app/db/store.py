@@ -52,6 +52,38 @@ async def insert_intent(session: AsyncSession, intent: Intent, intent_hash: str)
     )
 
 
+async def load_intent(session: AsyncSession, intent_id: str) -> Intent | None:
+    """Rebuild a stored ``Intent`` by id (the read counterpart to ``insert_intent``), so an
+    approved-later flow can re-seal the SAME intent (identical hash) without re-forming it."""
+    row = (
+        await session.execute(
+            sa.select(exec_intents).where(exec_intents.c.intent_id == intent_id)
+        )
+    ).mappings().first()
+    if row is None:
+        return None
+    return Intent(
+        intent_id=row["intent_id"],
+        created_at=row["created_at"],
+        expiry=row["expiry"],
+        source_signal_id=row["source_signal_id"],
+        action=row["action"],
+        chain_id=row["chain_id"],
+        market_id=row["market_id"],
+        condition_id=row["condition_id"],
+        side=row["side"],
+        size=row["size"],
+        max_price=row["max_price"],
+        max_slippage=row["max_slippage"],
+        notional_usd=row["notional_usd"],
+        to_address=row["to_address"],
+        token_id=row["token_id"],
+        approve_spender=row["approve_spender"],
+        approve_amount=row["approve_amount"],
+        nonce=row["nonce"],
+    )
+
+
 async def append_audit(
     session: AsyncSession,
     *,

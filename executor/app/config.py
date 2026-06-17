@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     # Secret the signer uses to verify approval-token HMACs (shared with the approval UI). SECRET.
     approval_secret: str = ""
     approval_token_ttl_s: int = 300
+    intent_ttl_s: int = 300  # how long a proposed intent stays valid (expiry = created_at + this)
 
     # --- Allowlists (csv -> frozenset via the properties below) --------------
     # Enforced in the breakers AND (later) independently in the signer.

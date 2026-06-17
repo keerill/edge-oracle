@@ -45,7 +45,10 @@ class Settings(BaseSettings):
     clob_api_base: str = "https://clob.polymarket.com"
     relay_url: str = ""  # Flashbots-style private relay (Phase 5)
     signer_url: str = ""  # internal signer service (Phase 4)
-    kms_key_id: str = ""  # non-secret KMS handle (Phase 4)
+    kms_key_id: str = ""  # non-secret AWS KMS handle (production signer)
+    # TESTNET-ONLY local signing key (Phase 4 offline). A SECRET — inject via a secret manager,
+    # NEVER commit, and NEVER set on mainnet (production uses kms_key_id, key never exported).
+    signer_private_key: str | None = None
     approval_token_ttl_s: int = 300
 
     # --- Allowlists (csv -> frozenset via the properties below) --------------

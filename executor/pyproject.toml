@@ -9,6 +9,9 @@ dependencies = [
     "alembic>=1.13",
     "pydantic>=2.7",
     "pydantic-settings>=2.4",
+    # Signer crypto (Phase 4). Local/testnet key signing + address recovery; the production
+    # path swaps the local key for AWS KMS (sign-only, key never exported) behind the same API.
+    "eth-account>=0.13",
 ]
 
 [dependency-groups]

@@ -25,7 +25,14 @@ from __future__ import annotations
 from decimal import Decimal
 
 from app.math.bet_sizing import edge_gate, position_size
-from app.models.advisor import AdvisedSignal, GateBreakdown
+from app.math.profit import (
+    arb_locked_profit,
+    expected_value,
+    prob_of_loss,
+    profit_if_loss,
+    profit_if_win,
+)
+from app.models.advisor import AdvisedSignal, Economics, GateBreakdown
 from app.models.quote import QuoteSnapshot
 from app.models.signal import (
     ArbSignal,
@@ -122,6 +129,28 @@ def _advise_directional(
             p_lo=p_lo,
             threshold=threshold,
         ),
+        economics=_directional_economics(size, threshold, p_side, p_lo),
+    )
+
+
+def _directional_economics(
+    stake: Decimal, threshold: Decimal, p_side: Decimal, p_lo: Decimal
+) -> Economics | None:
+    """The dollar view of a directional bet. Cost basis is the all-in ``threshold`` (so EV
+    matches the backtest's realized P&L); ``ev_usd`` uses your mean ``p_side`` and
+    ``ev_usd_conservative`` the gated CI lower bound ``p_lo`` (clamped to ``[0, 1]``).
+    Returns ``None`` only when ``threshold`` is outside ``(0, 1]`` (no payable share)."""
+    if not (ZERO < threshold <= ONE):
+        return None
+    p_lo_clamped = max(ZERO, min(ONE, p_lo))
+    return Economics(
+        ask=threshold,
+        stake_usd=stake,
+        profit_if_win_usd=profit_if_win(stake, threshold),
+        profit_if_loss_usd=profit_if_loss(stake),
+        ev_usd=expected_value(stake, threshold, p_side),
+        ev_usd_conservative=expected_value(stake, threshold, p_lo_clamped),
+        prob_of_loss=prob_of_loss(p_side),
     )
 
 
@@ -144,6 +173,11 @@ def _advise_arb(signal: ArbSignal, *, signal_id: str) -> AdvisedSignal:
         confidence=ONE,
         gate_passed=True,
         gate=None,
+        economics=Economics(
+            # Risk-free: the locked edge is the profit, independent of the outcome.
+            locked_profit_usd=arb_locked_profit(signal.net_edge, signal.set_size),
+            prob_of_loss=ZERO,
+        ),
     )
 
 

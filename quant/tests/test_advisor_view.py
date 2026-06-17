@@ -67,6 +67,18 @@ def test_directional_buy_yes_cap_binds():
     assert a.net_edge == Decimal("0.06")  # p_lo - threshold = 0.50 - 0.44
     # confidence = (0.50 - 0.44) / (1 - 0.44) = 0.06 / 0.56
     assert a.confidence.quantize(Decimal("0.000001")) == Decimal("0.107143")
+    # economics: stake $500 at all-in ask 0.44. profit_if_win = 500*(1-0.44)/0.44.
+    assert a.economics is not None
+    assert a.economics.ask == Decimal("0.44")
+    assert a.economics.stake_usd == Decimal("500.00")
+    assert a.economics.profit_if_loss_usd == Decimal("-500.00")
+    assert a.economics.prob_of_loss == Decimal("0.45")  # 1 - 0.55
+    # ev at mean p=0.55: 0.55*profit_if_win - 0.45*500
+    pw = Decimal("500.00") * (Decimal(1) - Decimal("0.44")) / Decimal("0.44")
+    assert a.economics.profit_if_win_usd == pw
+    assert a.economics.ev_usd == Decimal("0.55") * pw - Decimal("0.45") * Decimal("500.00")
+    # conservative ev uses p_lo = 0.50 (gated lower bound)
+    assert a.economics.ev_usd_conservative == Decimal("0.50") * pw - Decimal("0.50") * Decimal("500.00")
 
 
 def test_directional_gated_out():
@@ -152,6 +164,10 @@ def test_arb_is_risk_free_and_unsized():
     assert a.net_edge == Decimal("0.03")
     assert a.market_price == Decimal("0.95")  # set cost = 0.46 + 0.49
     assert a.recommended_size_usd == Decimal("0")
+    # economics: risk-free locked profit = net_edge * set_size, zero loss probability.
+    assert a.economics is not None
+    assert a.economics.locked_profit_usd == Decimal("0.03")  # 0.03 * 1
+    assert a.economics.prob_of_loss == Decimal("0")
 
 
 def test_longshot_is_display_only():
@@ -169,6 +185,7 @@ def test_longshot_is_display_only():
     assert a.net_edge == Decimal("0")
     assert a.market_price == Decimal("0.10")
     assert a.recommended_size_usd == Decimal("0")
+    assert a.economics is None  # display-only heuristic — no dollar view
 
 
 def test_confidence_boundaries():

@@ -38,6 +38,33 @@ class GateBreakdown(BaseModel):
     threshold: Decimal  # m + half_spread + slippage + gas (what p_lo must exceed)
 
 
+class Economics(BaseModel):
+    """The dollar-denominated view of a bet for a given bankroll — what the human sees to
+    decide "how much will I make and what can I lose". Computed by ``app.math.profit`` from
+    the already-sized stake. Fields are nullable so all three strategies share the model:
+
+      * directional (``extreme_correction``): ``ask``/``stake_usd``/``profit_if_win_usd``/
+        ``profit_if_loss_usd``/``ev_usd``/``ev_usd_conservative``/``prob_of_loss`` are set;
+        ``locked_profit_usd`` is ``None``.
+      * arb (``set_arb``): ``locked_profit_usd`` is set and ``prob_of_loss`` is ``0`` (risk-free);
+        the directional fields are ``None``.
+
+    ``ask`` is the all-in price you pay (``= GateBreakdown.threshold``), so ``ev_usd`` matches
+    the backtest's realized P&L. ``ev_usd`` uses your mean ``p``; ``ev_usd_conservative`` uses
+    the gated CI lower bound ``p_lo`` (the probability the system actually bets on)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ask: Decimal | None = None  # all-in price paid per share (m + half_spread + slippage + gas)
+    stake_usd: Decimal | None = None  # the recommended fractional-Kelly stake
+    profit_if_win_usd: Decimal | None = None
+    profit_if_loss_usd: Decimal | None = None  # = -stake for directional
+    ev_usd: Decimal | None = None  # expected $ profit at your mean p
+    ev_usd_conservative: Decimal | None = None  # expected $ profit at the gated p_lo
+    prob_of_loss: Decimal | None = None  # 1 - p (directional); 0 for risk-free arb
+    locked_profit_usd: Decimal | None = None  # risk-free arb profit (outcome-independent)
+
+
 class AdvisedSignal(BaseModel):
     """A detected signal enriched with sizing — one row of the Signals table / detail view.
 
@@ -68,3 +95,4 @@ class AdvisedSignal(BaseModel):
 
     gate_passed: bool
     gate: GateBreakdown | None  # populated for directional; None for arb / longshot
+    economics: Economics | None = None  # dollar view (directional + arb); None for longshot

@@ -15,6 +15,9 @@ dependencies = [
     # The signer's minimal HTTP surface (POST /sign). Deployed as its OWN isolated service.
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
+    # Consume the advisor's edge:signals stream (Phase 6b). Same client the quant streaming engine
+    # uses; the consumer CORE is dep-free (injected stream) — redis is only the runtime adapter.
+    "redis>=5",
 ]
 
 [dependency-groups]

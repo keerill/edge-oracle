@@ -26,6 +26,13 @@ class Settings(BaseSettings):
 
     # --- Master switch (default OFF — the hard gate) --------------------------
     enabled: bool = False
+    # Dry-run: run the FULL pipeline (form → breakers → approval → sign) but never broadcast —
+    # the submit step records what WOULD be sent and stops. Default TRUE: nothing reaches a
+    # network until explicitly turned off (and live submission additionally needs ``enabled``).
+    dry_run: bool = True
+    # Semi-auto: require a human approval token for EVERY trade (not just above the threshold).
+    # The operator chose manual confirmation per trade; this is the pipeline-level gate.
+    require_approval_for_all: bool = True
 
     # --- Database (the executor's OWN db, isolated from the advisor) ----------
     database_url: str = "postgresql+asyncpg://edge:edge@localhost:5432/edge_exec"

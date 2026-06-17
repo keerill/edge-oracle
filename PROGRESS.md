@@ -1250,6 +1250,37 @@ ingestion/resolution_engine,db/tables,main}.py`; `web/src/lib/{schemas/signal,ap
 approval UI → mainnet canary behind `EDGE_EXEC_ENABLED` + human sign-off). Real money/irreversible
 — gather custody + limits requirements first.
 
+## Slice: Execution Phase 5a — dry-run pipeline  ✅ done (2026-06-17)
+
+Part 2 (semi-auto execution) кикофф. Operator chose: **dry-run first, local testnet key,
+every trade manual**. This slice is the safe, fully-autonomous milestone — the whole chain
+runs end-to-end but **nothing reaches a network**.
+
+- **Config** (`executor/app/config.py`): `EDGE_EXEC_DRY_RUN` (default **true**) and
+  `EDGE_EXEC_REQUIRE_APPROVAL_FOR_ALL` (default **true** — manual confirmation per trade).
+- **`executor/app/relay/client.py`** — `submit(intent, signed, *, dry_run)`: dry-run records the
+  float-free order payload (Decimals as strings) + returns it for the audit; **live submission
+  raises `NotImplementedError`** (Polymarket CLOB needs a provider-specific signed-order schema +
+  API credentials — external; we refuse to guess a wire format with real money).
+- **`executor/app/orchestrator/pipeline.py`** — `execute_signal()` composes the tested pure
+  pieces: allocate nonce → `intent_from_signal` → persist + audit `formed` → `breakers.evaluate`
+  → approval gate → `signer.sign_intent` → `relay.submit` (dry-run) → audit `submitted`.
+  Dependency-injected (session/signer/policy/limits/state/clock/ids) like the advisor engines.
+- **Two safety properties pinned by tests:** (1) dry-run never broadcasts; (2) semi-auto blocks
+  any unsigned trade — every trade needs a valid HMAC approval token bound to the exact intent
+  hash, else the flow stops at `pending_approval` with no signature. Dry-run is exempt from the
+  master switch (it's a simulation); a real run still requires `EDGE_EXEC_ENABLED`.
+
+**Files:** new `executor/app/relay/{__init__,client}.py`, `executor/app/orchestrator/pipeline.py`,
+`executor/tests/test_relay_client.py`, `executor/tests/test_pipeline.py`; modified
+`executor/app/config.py`. **Verify:** `cd executor && uv run pytest -q` → 80 passed (with
+`EDGE_EXEC_TEST_DATABASE_URL`), ruff clean.
+
+**Next (Phases 5b–7, external deps / money decisions):** real Polymarket CLOB order schema +
+EIP-712 domain + API L2-auth (live submit on testnet); approval-workflow web UI (render intent,
+issue single-use TTL token); a Redis consumer/CLI to drive the pipeline from `edge:signals`;
+then AWS KMS signer + Gnosis Safe + capped mainnet canary behind `EDGE_EXEC_ENABLED` + sign-off.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

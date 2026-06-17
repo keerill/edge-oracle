@@ -1,0 +1,26 @@
+{
+  "id": "extreme_correction:m1:1750161600000",
+  "time": "2026-06-17T12:00:00Z",
+  "market_id": "m1",
+  "condition_id": "c1",
+  "market_question": "Will X happen?",
+  "strategy": "extreme_correction",
+  "kind": "buy_no",
+  "market_price": "0.20",
+  "p": "0.75",
+  "edge": "0.50",
+  "net_edge": "0.43",
+  "recommended_size_usd": "100",
+  "recommended_size_pct": "0.10",
+  "confidence": "0.6",
+  "gate_passed": true,
+  "gate": {
+    "m": "0.20",
+    "half_spread": "0.05",
+    "slippage": "0.01",
+    "gas": "0.01",
+    "margin": "0.05",
+    "p_lo": "0.70",
+    "threshold": "0.27"
+  }
+}

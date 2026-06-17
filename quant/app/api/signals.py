@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.advisor.ranking import rank_signals
 from app.advisor.view import advise
 from app.api.deps import get_app_settings, get_session
 from app.config import Settings
@@ -99,6 +100,17 @@ def _bankroll(settings: Settings, override: str | None) -> Decimal:
     return value
 
 
+def _min_net_edge(override: str | None) -> Decimal | None:
+    if override is None:
+        return None
+    try:
+        return Decimal(override)
+    except InvalidOperation as exc:
+        raise HTTPException(
+            status_code=422, detail=f"min_net_edge must be numeric, got {override!r}"
+        ) from exc
+
+
 @router.get("", response_model=list[AdvisedSignal])
 async def list_signals(
     session: AsyncSession = Depends(get_session),
@@ -106,9 +118,15 @@ async def list_signals(
     limit: int = Query(100, ge=1, le=500),
     strategy: str | None = Query(None),
     bankroll: str | None = Query(None, description="override the advisor bankroll (USD)"),
+    sort: str = Query("net_edge", pattern="^(net_edge|safety)$"),
+    safe_only: bool = Query(False, description="keep only risk-free arb + gate-passing bets"),
+    min_net_edge: str | None = Query(None, description="drop signals below this net edge"),
 ) -> list[AdvisedSignal]:
-    """Current signals, enriched with sizing, sorted by net-of-cost edge (descending)."""
+    """Current signals, enriched with sizing. ``sort=net_edge`` (default, descending) or
+    ``sort=safety`` (risk-free arb first, then gate-passing directional, then the rest).
+    ``safe_only`` and ``min_net_edge`` filter the list."""
     bank = _bankroll(settings, bankroll)
+    floor = _min_net_edge(min_net_edge)
     signals = await store.load_signals(session, strategy=strategy, limit=limit)
     markets = await store.load_tracked_markets(session)
     markets_by_id = {m.market_id: m for m in markets}
@@ -117,8 +135,7 @@ async def list_signals(
     frac = await effective_kelly_frac(session, settings)
 
     advised = [_enrich(s, markets_by_id, quotes_by_token, settings, bank, frac) for s in signals]
-    advised.sort(key=lambda a: a.net_edge, reverse=True)
-    return advised
+    return rank_signals(advised, sort=sort, safe_only=safe_only, min_net_edge=floor)
 
 
 @router.get("/{signal_id}", response_model=AdvisedSignal)

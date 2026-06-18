@@ -203,6 +203,19 @@ async def test_calibration_summary(client):
     assert body["timeline"][0]["n"] == 2
 
 
+async def test_paper_performance_zero_bet_report(client):
+    # No paper trades seeded -> a well-formed zero-bet scorecard (the dashboard always renders).
+    resp = await client.get("/paper-performance")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["n_closed"] == 0 and body["n_open"] == 0
+    assert body["total_return"] == "0"
+    assert body["hit_rate"] is None
+    assert body["equity_curve"] == []
+    assert body["arb_fill_assumed"] is False
+    assert body["final_bankroll"] == body["initial_bankroll"]
+
+
 async def test_config_defaults_then_persists_and_resizes(client):
     # No row yet -> effective config is the env defaults.
     cfg = (await client.get("/config")).json()

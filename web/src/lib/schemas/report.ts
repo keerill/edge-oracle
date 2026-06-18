@@ -85,3 +85,31 @@ export const BacktestResultSchema = z.object({
   monte_carlo: MonteCarloSchema.nullable(),
 });
 export type BacktestResult = z.infer<typeof BacktestResultSchema>;
+
+// Paper-trading scorecard: realized P&L of the advisor's recommendations against real
+// outcomes (the no-money validation track). Mirrors quant's PaperPerformance model.
+const PaperStrategyPerfSchema = z.object({
+  strategy: z.string(),
+  n: z.number().int(),
+  wins: z.number().int(),
+  hit_rate: money.nullable(),
+  total_pnl: money,
+  avg_return: money.nullable(),
+  sharpe_like: money.nullable(),
+});
+
+export const PaperPerformanceSchema = z.object({
+  initial_bankroll: money,
+  final_bankroll: money,
+  total_pnl: money,
+  total_return: money,
+  hit_rate: money.nullable(),
+  max_drawdown: money,
+  sharpe_like: money.nullable(),
+  n_closed: z.number().int(),
+  n_open: z.number().int(),
+  per_strategy: z.record(z.string(), PaperStrategyPerfSchema),
+  equity_curve: z.array(z.object({ time: z.string(), equity: money })),
+  arb_fill_assumed: z.boolean(),
+});
+export type PaperPerformance = z.infer<typeof PaperPerformanceSchema>;

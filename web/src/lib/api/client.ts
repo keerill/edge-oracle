@@ -12,8 +12,10 @@ import {
 import {
   BacktestResultSchema,
   CalibrationSummarySchema,
+  PaperPerformanceSchema,
   type BacktestResult,
   type CalibrationSummary,
+  type PaperPerformance,
 } from "@/lib/schemas/report";
 import { UserConfigSchema, type UserConfig } from "@/lib/schemas/config";
 import {
@@ -105,6 +107,10 @@ export async function getCalibration(): Promise<CalibrationSummary> {
 
 export async function getBacktest(): Promise<BacktestResult> {
   return BacktestResultSchema.parse(await fetchJson("/backtest"));
+}
+
+export async function getPaperPerformance(): Promise<PaperPerformance> {
+  return PaperPerformanceSchema.parse(await fetchJson("/paper-performance"));
 }
 
 export async function getConfig(): Promise<UserConfig> {

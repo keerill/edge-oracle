@@ -10,6 +10,7 @@ const NAV: { label: string; href: string | null }[] = [
   { label: "Portfolio", href: "/portfolio" },
   { label: "Approvals", href: "/approvals" },
   { label: "Backtest", href: "/backtest" },
+  { label: "Paper", href: "/paper-performance" },
   { label: "Calibration", href: "/calibration" },
   { label: "Settings", href: "/settings" },
 ];

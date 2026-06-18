@@ -38,6 +38,13 @@ const PERF: PaperPerformance = {
     { time: "2026-06-12T03:00:00+00:00", equity: 1063.8 },
   ],
   arb_fill_assumed: true,
+  arb_fill: {
+    checked: 4,
+    verified: 3,
+    expired: 1,
+    survival_rate: 0.75,
+    avg_latency_s: 11,
+  },
 };
 
 describe("PaperPerformanceView", () => {
@@ -53,7 +60,22 @@ describe("PaperPerformanceView", () => {
     expect(screen.getByText("Set Arb")).toBeInTheDocument();
     // The honesty caveat for set-arb fill-optimism is surfaced.
     expect(screen.getByText(/fill-optimistic/i)).toBeInTheDocument();
+    // The fill-survival card reports how the arb re-check is performing.
+    expect(screen.getByRole("heading", { name: "Arb fill survival" })).toBeInTheDocument();
+    expect(screen.getByText("75.0%")).toBeInTheDocument(); // survival rate
+    expect(screen.getByText("3 / 4")).toBeInTheDocument(); // verified / checked
+    expect(screen.getByText("11.0s")).toBeInTheDocument(); // avg re-check latency
     expect(screen.getAllByRole("img").length).toBeGreaterThanOrEqual(1); // equity curve
+  });
+
+  it("hides the fill-survival card when no arb has been re-checked", () => {
+    const noArb: PaperPerformance = {
+      ...PERF,
+      arb_fill_assumed: false,
+      arb_fill: { checked: 0, verified: 0, expired: 0, survival_rate: null, avg_latency_s: null },
+    };
+    render(<PaperPerformanceView perf={noArb} />);
+    expect(screen.queryByRole("heading", { name: "Arb fill survival" })).toBeNull();
   });
 
   it("explains the empty state when no paper trade has settled yet", () => {

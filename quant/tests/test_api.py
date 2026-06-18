@@ -213,6 +213,13 @@ async def test_paper_performance_zero_bet_report(client):
     assert body["hit_rate"] is None
     assert body["equity_curve"] == []
     assert body["arb_fill_assumed"] is False
+    assert body["arb_fill"] == {
+        "checked": 0,
+        "verified": 0,
+        "expired": 0,
+        "survival_rate": None,
+        "avg_latency_s": None,
+    }
     assert body["final_bankroll"] == body["initial_bankroll"]
 
 

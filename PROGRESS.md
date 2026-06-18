@@ -1501,6 +1501,30 @@ than replaying history at settlement.
 - `latency_s` from integer microseconds (no float in the money path). Same-side only: a window flip
   to the opposite arb counts as a failure.
 
+## Slice: Arb fill-survival on the scorecard (Slice F.2)  ✅ done (2026-06-18)
+
+Surfaces how the F.1 fill-check is performing on the web `/paper-performance` page — the operator
+can now see the trust signal (survival rate + re-check latency), not just an auto-hiding caveat.
+
+### What's done
+- **Quant** (`models/paper_performance.py`, `math/paper_performance.py`): new frozen
+  `ArbFillSummary` (`checked/verified/expired/survival_rate/avg_latency_s`) + pure
+  `summarize_arb_fill` over **all-status** set-arb trades (the verdict is set at capture, not
+  settlement). `summarize_paper_trades` gains `arb_trades=()` and emits `arb_fill`.
+  `survival = verified / (verified + expired)`; legacy rows (`fill_ok is None`) are excluded.
+- **Endpoint** (`api/paper.py`): collapsed to one `load_paper_trades(status=None)` load, derives
+  closed / `n_open` / set-arb subset in-process.
+- **Web** (`schemas/report.ts`, `format.ts`, `paper-performance/PaperPerformanceView.tsx`):
+  `ArbFillSchema` + `fmtSeconds`; an "Arb fill survival" card (rendered when `checked > 0`) shows
+  survival rate, verified/checked, expired, avg latency; the amber caveat banner reworded to "some
+  set-arbs predate / weren't re-confirmed" (it points at the survival card as the trustworthy read).
+
+### Verified
+- `cd quant && uv run pytest -q` → **373 passed / 29 skipped** offline; **402 passed** with
+  `EDGE_TEST_DATABASE_URL`. ruff clean.
+- `web` vitest **87 passed** (run via `node_modules/.bin/vitest run` — the host `pnpm` CLI is broken
+  on Node 20.12, unrelated to this change); `tsc --noEmit` clean. (`next lint` not configured.)
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

@@ -98,6 +98,15 @@ const PaperStrategyPerfSchema = z.object({
   sharpe_like: money.nullable(),
 });
 
+// How the set-arb fill re-check is performing (the trust signal for the arb track).
+const ArbFillSchema = z.object({
+  checked: z.number().int(),
+  verified: z.number().int(),
+  expired: z.number().int(),
+  survival_rate: money.nullable(),
+  avg_latency_s: money.nullable(),
+});
+
 export const PaperPerformanceSchema = z.object({
   initial_bankroll: money,
   final_bankroll: money,
@@ -111,5 +120,6 @@ export const PaperPerformanceSchema = z.object({
   per_strategy: z.record(z.string(), PaperStrategyPerfSchema),
   equity_curve: z.array(z.object({ time: z.string(), equity: money })),
   arb_fill_assumed: z.boolean(),
+  arb_fill: ArbFillSchema,
 });
 export type PaperPerformance = z.infer<typeof PaperPerformanceSchema>;

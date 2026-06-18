@@ -29,6 +29,10 @@ async def get_paper_performance(
     """The advisor's paper-trading scorecard against real outcomes (zero-bet report until the
     first paper trade settles). Initial bankroll is the operator's configured bankroll."""
     cfg = await effective_config(session, settings)
-    closed = await store.load_paper_trades(session, status="closed")
-    n_open = len(await store.load_paper_trades(session, status="open"))
-    return summarize_paper_trades(closed, initial_bankroll=cfg.bankroll, n_open=n_open)
+    trades = await store.load_paper_trades(session)  # all statuses
+    closed = [t for t in trades if t.status == "closed"]
+    n_open = sum(1 for t in trades if t.status == "open")
+    arb = [t for t in trades if t.strategy == "set_arb"]
+    return summarize_paper_trades(
+        closed, initial_bankroll=cfg.bankroll, n_open=n_open, arb_trades=arb
+    )

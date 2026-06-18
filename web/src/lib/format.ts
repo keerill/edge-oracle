@@ -30,6 +30,11 @@ export function fmtUsdSigned(value: number): string {
   return `${sign}$${Math.abs(value).toFixed(2)}`;
 }
 
+/** Seconds -> "12.0s" (for fill-check re-read latency). */
+export function fmtSeconds(value: number): string {
+  return `${value.toFixed(1)}s`;
+}
+
 /** The expected-$ headline for a row: directional EV, or the arb's locked (risk-free) profit. */
 export function advisedEv(signal: AdvisedSignal): number | null {
   const e = signal.economics;

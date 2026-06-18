@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from app.math.paper_performance import summarize_paper_trades
+from app.math.paper_performance import summarize_arb_fill, summarize_paper_trades
 from app.models.paper_trade import PaperTrade
 
 T0 = datetime(2026, 6, 1, tzinfo=UTC)
@@ -47,6 +47,7 @@ def test_empty_is_zero_bet_report() -> None:
     assert perf.max_drawdown == Decimal("0")
     assert perf.equity_curve == ()
     assert perf.arb_fill_assumed is False
+    assert perf.arb_fill.checked == 0 and perf.arb_fill.survival_rate is None
 
 
 def test_two_directional_bets_worked_example() -> None:
@@ -86,6 +87,58 @@ def test_arb_fill_assumed_false_when_verified() -> None:
     verified = arb.model_copy(update={"fill_ok": True, "rechecked_net_edge": Decimal("0.03")})
     perf = summarize_paper_trades([verified], initial_bankroll=Decimal("1000"))
     assert perf.arb_fill_assumed is False  # fill-verified at capture -> caveat drops
+
+
+# --- fill-survival summary ----------------------------------------------------
+
+
+def _arb(pid, *, fill_ok, latency, status="closed") -> PaperTrade:
+    pnl = "0.03" if fill_ok else None
+    t = _closed(pid, strategy="set_arb", side="set", stake="1", pnl="0.03", outcome=None)
+    return t.model_copy(
+        update={
+            "status": status,
+            "realized_pnl": Decimal(pnl) if pnl is not None else None,
+            "fill_ok": fill_ok,
+            "fill_latency_s": Decimal(latency),
+            "fill_checked_at": T0,
+        }
+    )
+
+
+def test_summarize_arb_fill_worked_example() -> None:
+    # 3 verified (open/closed) + 1 expired; latencies 10, 12, 14, 8 -> mean 11
+    trades = [
+        _arb("1", fill_ok=True, latency="10"),
+        _arb("2", fill_ok=True, latency="12", status="open"),
+        _arb("3", fill_ok=True, latency="14"),
+        _arb("4", fill_ok=False, latency="8", status="expired"),
+    ]
+    s = summarize_arb_fill(trades)
+    assert s.checked == 4 and s.verified == 3 and s.expired == 1
+    assert s.survival_rate == Decimal("0.75")
+    assert s.avg_latency_s == Decimal("11")
+
+
+def test_summarize_arb_fill_ignores_legacy_and_empty() -> None:
+    legacy = _closed("1", strategy="set_arb", side="set", stake="1", pnl="0.03", outcome=None)
+    s = summarize_arb_fill([legacy])  # fill_ok is None -> not counted
+    assert s.checked == 0 and s.verified == 0 and s.expired == 0
+    assert s.survival_rate is None and s.avg_latency_s is None
+    empty = summarize_arb_fill([])
+    assert empty.checked == 0 and empty.survival_rate is None
+
+
+def test_summarize_paper_trades_includes_arb_fill() -> None:
+    direc = _closed("1", strategy="extreme_correction", pnl="75")
+    arb_closed = _arb("2", fill_ok=True, latency="9")
+    arb_expired = _arb("3", fill_ok=False, latency="11", status="expired")
+    perf = summarize_paper_trades(
+        [direc, arb_closed], initial_bankroll=Decimal("1000"), arb_trades=[arb_closed, arb_expired]
+    )
+    assert perf.arb_fill.checked == 2 and perf.arb_fill.verified == 1
+    assert perf.arb_fill.survival_rate == Decimal("0.5")
+    assert perf.arb_fill.avg_latency_s == Decimal("10")
 
 
 def test_open_trades_excluded_from_scoring() -> None:

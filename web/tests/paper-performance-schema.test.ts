@@ -26,6 +26,13 @@ const RAW = {
   },
   equity_curve: [{ time: "2026-06-12T03:00:00+00:00", equity: "1063.80" }],
   arb_fill_assumed: true,
+  arb_fill: {
+    checked: 4,
+    verified: 3,
+    expired: 1,
+    survival_rate: "0.75",
+    avg_latency_s: "11.5",
+  },
 };
 
 describe("PaperPerformanceSchema", () => {
@@ -38,5 +45,9 @@ describe("PaperPerformanceSchema", () => {
     expect(parsed.per_strategy.extreme_correction!.total_pnl).toBe(51.3);
     expect(parsed.equity_curve[0]!.equity).toBe(1063.8);
     expect(parsed.arb_fill_assumed).toBe(true);
+    // The nested fill-survival block coerces its Decimal strings too.
+    expect(parsed.arb_fill.survival_rate).toBe(0.75);
+    expect(parsed.arb_fill.avg_latency_s).toBe(11.5);
+    expect(parsed.arb_fill.verified).toBe(3);
   });
 });

@@ -17,7 +17,11 @@ from decimal import Decimal
 
 from app.math.backtest import max_drawdown, sharpe_like, total_return
 from app.models.backtest import EquityPoint
-from app.models.paper_performance import PaperPerformance, PaperStrategyPerf
+from app.models.paper_performance import (
+    ArbFillSummary,
+    PaperPerformance,
+    PaperStrategyPerf,
+)
 from app.models.paper_trade import PaperTrade
 
 ZERO = Decimal(0)
@@ -33,6 +37,26 @@ def _per_bet_return(t: PaperTrade) -> Decimal | None:
     if t.stake_usd <= ZERO or t.realized_pnl is None:
         return None
     return t.realized_pnl / t.stake_usd
+
+
+def summarize_arb_fill(arb_trades: Sequence[PaperTrade]) -> ArbFillSummary:
+    """Fill re-check health over the set-arb trades that received a verdict (any status).
+
+    ``verified`` = ``fill_ok is True``, ``expired`` = ``fill_ok is False``; the survival rate and
+    mean latency are over those ``checked`` arbs. Legacy rows (no fill check, ``fill_ok is None``)
+    are ignored — they predate the check and don't reflect its performance."""
+    verdicts = [t for t in arb_trades if t.fill_ok is not None]
+    verified = sum(1 for t in verdicts if t.fill_ok is True)
+    expired = sum(1 for t in verdicts if t.fill_ok is False)
+    checked = len(verdicts)
+    latencies = [t.fill_latency_s for t in verdicts if t.fill_latency_s is not None]
+    return ArbFillSummary(
+        checked=checked,
+        verified=verified,
+        expired=expired,
+        survival_rate=(Decimal(verified) / Decimal(checked)) if checked else None,
+        avg_latency_s=(sum(latencies, ZERO) / Decimal(len(latencies))) if latencies else None,
+    )
 
 
 def _strategy_perf(strategy: str, trades: Sequence[PaperTrade]) -> PaperStrategyPerf:
@@ -57,10 +81,12 @@ def summarize_paper_trades(
     *,
     initial_bankroll: Decimal,
     n_open: int = 0,
+    arb_trades: Sequence[PaperTrade] = (),
 ) -> PaperPerformance:
     """Score the settled paper trades into a performance report. ``n_open`` is the count of
-    still-open (unsettled) paper trades, surfaced for context. ``initial_bankroll`` must be > 0.
-    """
+    still-open (unsettled) paper trades, surfaced for context. ``arb_trades`` are the set-arb
+    trades of *every* status, used for the fill-survival summary (the verdict is set at capture,
+    not settlement, so it spans open/closed/expired). ``initial_bankroll`` must be > 0."""
     settled = _settled_sorted(trades)
     total_pnl = sum((t.realized_pnl or ZERO for t in settled), ZERO)
     final = initial_bankroll + total_pnl
@@ -98,4 +124,5 @@ def summarize_paper_trades(
         per_strategy=per_strategy,
         equity_curve=tuple(curve),
         arb_fill_assumed=arb_fill_assumed,
+        arb_fill=summarize_arb_fill(arb_trades),
     )

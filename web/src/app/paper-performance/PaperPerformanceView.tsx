@@ -1,7 +1,7 @@
 import GlassCard from "@/components/GlassCard";
 import EquityCurve from "@/components/charts/EquityCurve";
 import type { PaperPerformance } from "@/lib/schemas/report";
-import { fmtPct, fmtUsd, fmtUsdSigned } from "@/lib/format";
+import { fmtPct, fmtSeconds, fmtUsd, fmtUsdSigned } from "@/lib/format";
 import styles from "@/components/reportLayout.module.scss";
 
 // Presentational paper-trading scorecard — the no-money validation track. The advisor logs the
@@ -98,13 +98,31 @@ export default function PaperPerformanceView({ perf }: { perf: PaperPerformance 
             </table>
           </GlassCard>
 
+          {perf.arb_fill.checked > 0 && (
+            <GlassCard strong className={styles.tableCard}>
+              <h2 className={styles.cardTitle}>Arb fill survival</h2>
+              <p className={styles.cardSub}>
+                Each set-arb is re-priced on a fresh book the moment it&apos;s captured; this covers
+                every re-checked arb — open, settled and expired. Arbs skipped on a fetch error
+                aren&apos;t counted. A high survival rate is what makes the arb P&amp;L trustworthy.
+              </p>
+              <div className={styles.metrics}>
+                <Metric label="Survival rate" value={orDash(perf.arb_fill.survival_rate, fmtPct)} accent />
+                <Metric label="Verified" value={`${perf.arb_fill.verified} / ${perf.arb_fill.checked}`} />
+                <Metric label="Expired" value={String(perf.arb_fill.expired)} hint="edge gone on re-check" />
+                <Metric label="Avg re-check latency" value={orDash(perf.arb_fill.avg_latency_s, fmtSeconds)} />
+              </div>
+            </GlassCard>
+          )}
+
           {perf.arb_fill_assumed && (
             <GlassCard glow="amber" className={styles.notice}>
-              <strong>Set-arb P&amp;L is fill-optimistic.</strong>
+              <strong>Some set-arb P&amp;L is fill-optimistic.</strong>
               <span className={styles.noticeSub}>
-                It assumes the dislocation was still fillable at the advised VWAP — there&apos;s no
-                latency/fill-quality re-check yet. Trust the outcome-verified directional track; read
-                the set-arb row as a ceiling until a real fill-check lands.
+                One or more settled set-arbs predate the fill-check or weren&apos;t re-confirmed on a
+                fresh book, so their locked edge assumes the dislocation was still fillable. Read
+                those as a ceiling; the outcome-verified directional track and the fill-survival
+                numbers above are the ones to trust.
               </span>
             </GlassCard>
           )}

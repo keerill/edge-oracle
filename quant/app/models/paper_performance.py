@@ -33,6 +33,22 @@ class PaperStrategyPerf(BaseModel):
     sharpe_like: Decimal | None
 
 
+class ArbFillSummary(BaseModel):
+    """How the set-arb fill re-check is performing — the trust signal for the arb track.
+
+    Spans set-arb trades of every status (a verified arb is captured ``open`` and may later
+    close; a failed one is ``expired``), since the verdict is set at capture, not settlement.
+    Arbs skipped on a fetch error are never persisted, so they sit outside ``checked``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    checked: int  # verified + expired (arbs that received a fill verdict)
+    verified: int  # fill_ok is True (edge survived the latency gap)
+    expired: int  # fill_ok is False (edge vanished -> captured expired)
+    survival_rate: Decimal | None  # verified / checked (None when checked == 0)
+    avg_latency_s: Decimal | None  # mean fill_latency_s over checked arbs (None when 0)
+
+
 class PaperPerformance(BaseModel):
     """The paper-trading scorecard: realized P&L of the advisor's recommendations against real
     outcomes, plus the per-strategy breakdown and the realized equity curve."""
@@ -50,4 +66,5 @@ class PaperPerformance(BaseModel):
     n_open: int
     per_strategy: dict[str, PaperStrategyPerf]
     equity_curve: tuple[EquityPoint, ...]
-    arb_fill_assumed: bool  # caveat: set-arb paper P&L is fill-optimistic (see settlement)
+    arb_fill_assumed: bool  # caveat: a settled set-arb predates / failed the fill-check
+    arb_fill: ArbFillSummary  # how the fill re-check is performing (zeros when no arbs)

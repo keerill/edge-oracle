@@ -481,6 +481,34 @@ async def test_insert_paper_trades_empty_is_noop(sessionmaker):
 
 
 @pytest.mark.asyncio
+async def test_paper_trades_insert_idempotent_on_id_conflict(sessionmaker):
+    from app.models.paper_trade import PaperTrade
+
+    pt = PaperTrade(
+        id="pt1",
+        advised_at=datetime(2026, 6, 1, tzinfo=UTC),
+        strategy="extreme_correction",
+        market_id="m1",
+        condition_id="c1",
+        side="yes",
+        advised_price=Decimal("0.42"),
+        stake_usd=Decimal("50"),
+        shares=Decimal("119.047619"),
+        edge=Decimal("0.08"),
+    )
+    async with sessionmaker() as s:
+        assert await store.insert_paper_trades(s, [pt]) == 1  # first insert lands
+        await s.commit()
+    async with sessionmaker() as s:
+        # re-inserting the same id is a no-op (ON CONFLICT DO NOTHING) — returns 0, never raises
+        assert await store.insert_paper_trades(s, [pt]) == 0
+        await s.commit()
+    async with sessionmaker() as s:
+        rows = await store.load_paper_trades(s)
+        assert len(rows) == 1 and rows[0].id == "pt1"
+
+
+@pytest.mark.asyncio
 async def test_settle_paper_trade_closes_with_pnl(sessionmaker):
     from app.models.paper_trade import PaperTrade
 

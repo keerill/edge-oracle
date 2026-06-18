@@ -1525,6 +1525,17 @@ can now see the trust signal (survival rate + re-check latency), not just an aut
 - `web` vitest **87 passed** (run via `node_modules/.bin/vitest run` — the host `pnpm` CLI is broken
   on Node 20.12, unrelated to this change); `tsc --noEmit` clean. (`next lint` not configured.)
 
+## Slice: Idempotent paper-trade insert (Slice F.4)  ✅ done (2026-06-18)
+
+Closes the PK-reuse edge noted under Slice F: if an old signal re-fires at the same `epoch_ms`
+after its `(strategy, condition_id)` key frees up, the derived paper-trade `id` could collide and a
+plain insert would raise, killing the capture cycle. `store.insert_paper_trades` now uses
+`pg_insert(...).on_conflict_do_nothing(index_elements=["id"]).returning(id)` (the same dialect idiom
+as `upsert_markets`/`upsert_user_config`) and returns the rows **actually** inserted — duplicates are
+skipped, never raise, and no longer over-count the `captured=` log line. DB-gated test:
+`test_paper_trades_insert_idempotent_on_id_conflict`. `uv run pytest` → **403 passed** with
+`EDGE_TEST_DATABASE_URL`; ruff clean.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

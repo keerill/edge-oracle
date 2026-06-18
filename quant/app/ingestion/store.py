@@ -436,13 +436,20 @@ def _paper_trade_from_row(r) -> PaperTrade:
 async def insert_paper_trades(
     session: AsyncSession, paper_trades: Sequence[PaperTrade]
 ) -> int:
-    """Append auto-captured advisory recommendations. Batch insert; returns the count."""
+    """Append auto-captured advisory recommendations. Idempotent on ``id`` (ON CONFLICT DO
+    NOTHING guards the rare PK reuse when an old signal re-fires at the same epoch_ms after its
+    ``(strategy, condition_id)`` key frees up). Returns the rows actually inserted — skipped
+    duplicates don't count (and never raise, so they can't kill a capture cycle)."""
     if not paper_trades:
         return 0
-    await session.execute(
-        insert(paper_trades_table), [pt.model_dump() for pt in paper_trades]
+    stmt = (
+        pg_insert(paper_trades_table)
+        .values([pt.model_dump() for pt in paper_trades])
+        .on_conflict_do_nothing(index_elements=["id"])
+        .returning(paper_trades_table.c.id)
     )
-    return len(paper_trades)
+    result = await session.execute(stmt)
+    return len(result.fetchall())
 
 
 async def load_paper_trades(

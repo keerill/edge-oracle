@@ -465,3 +465,37 @@ async def test_paper_trades_insert_load_decimal_roundtrip(sessionmaker):
 async def test_insert_paper_trades_empty_is_noop(sessionmaker):
     async with sessionmaker() as s:
         assert await store.insert_paper_trades(s, []) == 0
+
+
+@pytest.mark.asyncio
+async def test_settle_paper_trade_closes_with_pnl(sessionmaker):
+    from app.models.paper_trade import PaperTrade
+
+    pt = PaperTrade(
+        id="pt1",
+        advised_at=datetime(2026, 6, 1, tzinfo=UTC),
+        strategy="extreme_correction",
+        market_id="m1",
+        condition_id="c1",
+        side="yes",
+        advised_price=Decimal("0.40"),
+        stake_usd=Decimal("50"),
+        shares=Decimal("125"),
+        edge=Decimal("0.06"),
+        p=Decimal("0.55"),
+        p_lo=Decimal("0.50"),
+    )
+    async with sessionmaker() as s:
+        await store.insert_paper_trades(s, [pt])
+        await s.commit()
+    async with sessionmaker() as s:
+        await store.settle_paper_trade(
+            s, "pt1", outcome=1, realized_pnl=Decimal("75"),
+            resolved_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        await s.commit()
+    async with sessionmaker() as s:
+        assert await store.load_paper_trades(s, status="open") == []
+        closed = await store.load_paper_trades(s, status="closed")
+        assert len(closed) == 1
+        assert closed[0].outcome == 1 and closed[0].realized_pnl == Decimal("75")

@@ -455,6 +455,25 @@ async def load_paper_trades(
     return [_paper_trade_from_row(r) for r in rows]
 
 
+async def settle_paper_trade(
+    session: AsyncSession,
+    paper_trade_id: str,
+    *,
+    outcome: int | None,
+    realized_pnl: Decimal,
+    resolved_at: datetime,
+    status: str = "closed",
+) -> None:
+    """Close a paper trade with its realized P&L (idempotent: the caller only settles
+    ``status='open'`` rows). ``outcome`` is the market's YES result for directional rows, or
+    ``None`` for outcome-independent set-arb."""
+    await session.execute(
+        update(paper_trades_table)
+        .where(paper_trades_table.c.id == paper_trade_id)
+        .values(status=status, outcome=outcome, realized_pnl=realized_pnl, resolved_at=resolved_at)
+    )
+
+
 async def load_calibration(
     session: AsyncSession, strategy: str | None = None
 ) -> list[CalibrationRecord]:

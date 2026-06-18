@@ -177,6 +177,66 @@ async def test_settlement_skips_unresolved_and_arb_positions(monkeypatch):
     assert result.settled == 0 and settled == []
 
 
+# --- paper-trade settlement -------------------------------------------------
+
+
+def _paper(pid, cid, *, side="yes", price="0.40", stake="50", edge="0.06", shares="125"):
+    from app.models.paper_trade import PaperTrade
+
+    return PaperTrade(
+        id=pid, advised_at=AT, strategy="extreme_correction" if side != "set" else "set_arb",
+        market_id="m1", condition_id=cid, side=side, advised_price=Decimal(price),
+        stake_usd=Decimal(stake), shares=Decimal(shares), edge=Decimal(edge),
+    )
+
+
+def _patch_paper(monkeypatch, *, open_trades, settled):
+    async def load_paper_trades(session, *, status=None):
+        return list(open_trades)
+
+    async def settle_paper_trade(session, paper_trade_id, *, outcome, realized_pnl, resolved_at,
+                                 status="closed"):
+        settled.append({"id": paper_trade_id, "outcome": outcome, "pnl": realized_pnl})
+
+    monkeypatch.setattr(store, "load_paper_trades", load_paper_trades)
+    monkeypatch.setattr(store, "settle_paper_trade", settle_paper_trade)
+
+
+async def test_paper_directional_settles_against_real_outcome(monkeypatch):
+    settled: list[dict] = []
+    _patch_paper(monkeypatch, open_trades=[_paper("pt1", "c1", side="yes")], settled=settled)
+    gamma = FakeGamma([_resolved("c1", ["1", "0"])])  # YES won
+    result = await resolution_engine.run_paper_settlement_once(
+        gamma, fake_sessionmaker, Settings(), now=lambda: AT
+    )
+    assert result.directional_settled == 1 and result.arb_settled == 0
+    # YES paper bet at all-in 0.40 for $50 won -> 50*(1-0.40)/0.40 = 75.
+    assert settled[0]["outcome"] == 1 and settled[0]["pnl"] == Decimal("75")
+
+
+async def test_paper_arb_settles_immediately_at_locked_edge(monkeypatch):
+    settled: list[dict] = []
+    arb = _paper("pt2", "c2", side="set", price="0.96", stake="1", edge="0.03", shares="1")
+    _patch_paper(monkeypatch, open_trades=[arb], settled=settled)
+    gamma = FakeGamma([])  # no resolution needed for arb
+    result = await resolution_engine.run_paper_settlement_once(
+        gamma, fake_sessionmaker, Settings(), now=lambda: AT
+    )
+    assert result.arb_settled == 1 and result.directional_settled == 0
+    # locked profit = edge * shares = 0.03 * 1; outcome-independent (None).
+    assert settled[0]["outcome"] is None and settled[0]["pnl"] == Decimal("0.03")
+
+
+async def test_paper_directional_unresolved_is_left_open(monkeypatch):
+    settled: list[dict] = []
+    _patch_paper(monkeypatch, open_trades=[_paper("pt3", "c3", side="yes")], settled=settled)
+    gamma = FakeGamma([])  # c3 not resolved
+    result = await resolution_engine.run_paper_settlement_once(
+        gamma, fake_sessionmaker, Settings(), now=lambda: AT
+    )
+    assert result.directional_settled == 0 and settled == []
+
+
 # --- the calibration -> live Kelly wiring -----------------------------------
 
 async def test_effective_frac_falls_back_on_empty_journal(monkeypatch):

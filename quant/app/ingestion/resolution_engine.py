@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -24,7 +24,7 @@ from app.config import Settings, get_settings
 from app.db.engine import get_sessionmaker
 from app.ingestion import store, transform
 from app.ingestion.resolution import calibration_from_resolution, resolved_outcome
-from app.math.profit import settled_pnl
+from app.math.profit import arb_locked_profit, settled_pnl
 from app.models.calibration import CalibrationRecord
 from app.models.signal import ExtremeCorrectionSignal
 from app.observability.logging import configure_logging
@@ -145,29 +145,160 @@ async def run_position_settlement_once(
     return SettlementResult(checked=len(outcome_by_condition), settled=settled)
 
 
+@dataclass(frozen=True)
+class PaperSettlementResult:
+    directional_settled: int  # paper trades closed against a real market outcome
+    arb_settled: int  # set-arb paper trades closed at their locked (fill-assumed) edge
+
+
+async def run_paper_settlement_once(
+    gamma: GammaClient,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    *,
+    now: Callable[[], datetime] = _utcnow,
+) -> PaperSettlementResult:
+    """One paper-trade settlement cycle (timing-free) — the no-money P&L scorer.
+
+    Directional ('yes'/'no') paper trades settle against the real market outcome exactly like
+    live positions (cost basis = the advised all-in price), so paper P&L matches the backtest.
+    Set-arb ('set') paper trades are outcome-independent: they settle immediately at their
+    locked ``edge`` (per set).
+
+    CAVEAT (verify-before-live): the arb P&L is **optimistic** — it assumes the dislocation was
+    still fillable at the advised VWAP when acted on. There is no latency / fill-quality re-check
+    yet, so arb paper P&L is an upper bound; the per-strategy breakdown keeps it separate from the
+    outcome-verified directional track. Only ``status='open'`` rows are touched (idempotent)."""
+    at = now()
+    async with sessionmaker() as session:
+        open_trades = await store.load_paper_trades(session, status="open")
+    if not open_trades:
+        return PaperSettlementResult(directional_settled=0, arb_settled=0)
+
+    arb = [pt for pt in open_trades if pt.side == "set"]
+    directional = [pt for pt in open_trades if pt.side in ("yes", "no")]
+
+    outcome_by_condition: dict[str, int] = {}
+    if directional:
+        condition_ids = sorted({pt.condition_id for pt in directional})
+        resolved = await gamma.fetch_resolutions(condition_ids)
+        for raw in resolved:
+            outcomes = transform.parse_stringified_str_array(raw.outcomes)
+            prices = transform.parse_stringified_str_array(raw.outcomePrices)
+            outcome = resolved_outcome(outcomes, prices)
+            if outcome is not None:
+                outcome_by_condition[raw.conditionId] = outcome
+
+    arb_settled = 0
+    directional_settled = 0
+    async with sessionmaker() as session:
+        for pt in arb:
+            pnl = arb_locked_profit(pt.edge, pt.shares)
+            await store.settle_paper_trade(
+                session, pt.id, outcome=None, realized_pnl=pnl, resolved_at=at
+            )
+            arb_settled += 1
+        for pt in directional:
+            outcome = outcome_by_condition.get(pt.condition_id)
+            if outcome is None:
+                continue
+            pnl = settled_pnl(pt.side, pt.stake_usd, pt.advised_price, outcome)
+            await store.settle_paper_trade(
+                session, pt.id, outcome=outcome, realized_pnl=pnl, resolved_at=at
+            )
+            directional_settled += 1
+        await session.commit()
+
+    return PaperSettlementResult(
+        directional_settled=directional_settled, arb_settled=arb_settled
+    )
+
+
+async def run_resolution_cycle(
+    gamma: GammaClient,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    *,
+    now: Callable[[], datetime] = _utcnow,
+) -> tuple[ResolutionScanResult, SettlementResult, PaperSettlementResult]:
+    """All three resolution-time passes: journal calibration, settle live positions, settle
+    paper trades. Run once per loop tick (and as the one-shot CLI)."""
+    scan = await run_resolution_scan_once(gamma, sessionmaker, settings, now=now)
+    positions = await run_position_settlement_once(gamma, sessionmaker, settings, now=now)
+    paper = await run_paper_settlement_once(gamma, sessionmaker, settings, now=now)
+    return scan, positions, paper
+
+
+async def run_resolution_poller(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    max_cycles: int | None = None,
+) -> None:
+    """Run the resolution cycle forever (or ``max_cycles`` times, for tests). Resolutions are
+    slow, so this reuses the discovery cadence rather than the fast scan interval."""
+    cycle = 0
+    while max_cycles is None or cycle < max_cycles:
+        try:
+            async with make_http_client(settings) as http:
+                gamma = GammaClient(http, settings)
+                scan, positions, paper = await run_resolution_cycle(gamma, sessionmaker, settings)
+            logger.info(
+                "resolution cycle: journaled=%d positions_settled=%d "
+                "paper_settled=%d (directional=%d arb=%d)",
+                scan.journaled,
+                positions.settled,
+                paper.directional_settled + paper.arb_settled,
+                paper.directional_settled,
+                paper.arb_settled,
+            )
+        except Exception as exc:  # noqa: BLE001 - never let one tick kill the loop
+            logger.exception("resolution cycle failed: %r", exc)
+
+        cycle += 1
+        if max_cycles is not None and cycle >= max_cycles:
+            break
+        await sleep(settings.discovery_interval_s)
+
+
 async def _run_once() -> None:
     settings = get_settings()
     sessionmaker = get_sessionmaker()
     async with make_http_client(settings) as http:
         gamma = GammaClient(http, settings)
-        result = await run_resolution_scan_once(gamma, sessionmaker, settings)
-        settlement = await run_position_settlement_once(gamma, sessionmaker, settings)
+        scan, positions, paper = await run_resolution_cycle(gamma, sessionmaker, settings)
     logger.info(
-        "one-shot resolution scan: checked=%d journaled=%d positions_settled=%d",
-        result.checked,
-        result.journaled,
-        settlement.settled,
+        "one-shot resolution scan: checked=%d journaled=%d positions_settled=%d "
+        "paper_settled=%d (directional=%d arb=%d)",
+        scan.checked,
+        scan.journaled,
+        positions.settled,
+        paper.directional_settled + paper.arb_settled,
+        paper.directional_settled,
+        paper.arb_settled,
     )
 
 
+async def _run_loop() -> None:
+    settings = get_settings()
+    await run_resolution_poller(get_sessionmaker(), settings)
+
+
 def main() -> None:
-    """CLI: ``python -m app.ingestion.resolution_engine`` (one cycle)."""
+    """CLI: ``python -m app.ingestion.resolution_engine`` (one cycle) or ``... loop`` (forever)."""
+    import sys
+
     configure_logging("quant.resolution")
     init_sentry("quant.resolution")
     settings = get_settings()
     if settings.metrics_enabled:
         start_metrics_server(settings.metrics_port)
-    asyncio.run(_run_once())
+    mode = sys.argv[1] if len(sys.argv) > 1 else "once"
+    if mode == "loop":
+        asyncio.run(_run_loop())
+    else:
+        asyncio.run(_run_once())
 
 
 if __name__ == "__main__":

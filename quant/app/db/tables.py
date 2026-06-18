@@ -171,3 +171,36 @@ positions = sa.Table(
 
 sa.Index("ix_positions_status", positions.c.status)
 sa.Index("ix_positions_condition", positions.c.condition_id)
+
+# Paper-trading journal — one row per advisory recommendation the system would have placed,
+# logged automatically at advice time (no money, no execution) so the strategy can be scored
+# against real outcomes. The no-money sibling of ``positions``: same shape, but auto-captured
+# rather than operator-entered. ``p``/``p_lo`` (claimed prob + CI lower bound) populate only
+# for directional rows; ``outcome``/``realized_pnl``/``resolved_at`` stay NULL until settlement.
+# ``status`` is open|closed|expired. All money is unbounded NUMERIC (Decimal). Indexed by
+# status and by condition for settlement.
+paper_trades = sa.Table(
+    "paper_trades",
+    metadata,
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column("advised_at", sa.TIMESTAMP(timezone=True), nullable=False),
+    sa.Column("strategy", sa.Text, nullable=False),
+    sa.Column("market_id", sa.Text, nullable=False),
+    sa.Column("condition_id", sa.Text, nullable=False),
+    sa.Column("side", sa.Text, nullable=False),  # yes / no / set
+    sa.Column("advised_price", sa.Numeric, nullable=False),  # all-in price paid per share
+    sa.Column("stake_usd", sa.Numeric, nullable=False),
+    sa.Column("shares", sa.Numeric, nullable=False),
+    sa.Column("edge", sa.Numeric, nullable=False),
+    sa.Column("p", sa.Numeric, nullable=True),  # claimed probability (directional only)
+    sa.Column("p_lo", sa.Numeric, nullable=True),  # CI lower bound (directional only)
+    sa.Column("status", sa.Text, nullable=False, server_default=sa.text("'open'")),
+    sa.Column("outcome", sa.SmallInteger, nullable=True),
+    sa.Column("realized_pnl", sa.Numeric, nullable=True),
+    sa.Column("resolved_at", sa.TIMESTAMP(timezone=True), nullable=True),
+    sa.Column("signal_id", sa.Text, nullable=True),
+    sa.CheckConstraint("outcome IS NULL OR outcome IN (0, 1)", name="ck_paper_trades_outcome"),
+)
+
+sa.Index("ix_paper_trades_status", paper_trades.c.status)
+sa.Index("ix_paper_trades_condition", paper_trades.c.condition_id)

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.tables import calibration as calibration_table
 from app.db.tables import markets as markets_table
+from app.db.tables import paper_trades as paper_trades_table
 from app.db.tables import positions as positions_table
 from app.db.tables import quotes as quotes_table
 from app.db.tables import signals as signals_table
@@ -25,6 +26,7 @@ from app.db.tables import user_config as user_config_table
 from app.models.calibration import CalibrationRecord
 from app.models.config import UserConfig
 from app.models.market import Market
+from app.models.paper_trade import PaperTrade
 from app.models.position import Position
 from app.models.quote import QuoteSnapshot
 from app.models.signal import (
@@ -402,6 +404,55 @@ async def settle_position(
         .where(positions_table.c.id == position_id)
         .values(status="closed", outcome=outcome, pnl=pnl, resolved_at=resolved_at)
     )
+
+
+def _paper_trade_from_row(r) -> PaperTrade:
+    return PaperTrade(
+        id=r["id"],
+        advised_at=r["advised_at"],
+        strategy=r["strategy"],
+        market_id=r["market_id"],
+        condition_id=r["condition_id"],
+        side=r["side"],
+        advised_price=r["advised_price"],
+        stake_usd=r["stake_usd"],
+        shares=r["shares"],
+        edge=r["edge"],
+        p=r["p"],
+        p_lo=r["p_lo"],
+        status=r["status"],
+        outcome=r["outcome"],
+        realized_pnl=r["realized_pnl"],
+        resolved_at=r["resolved_at"],
+        signal_id=r["signal_id"],
+    )
+
+
+async def insert_paper_trades(
+    session: AsyncSession, paper_trades: Sequence[PaperTrade]
+) -> int:
+    """Append auto-captured advisory recommendations. Batch insert; returns the count."""
+    if not paper_trades:
+        return 0
+    await session.execute(
+        insert(paper_trades_table), [pt.model_dump() for pt in paper_trades]
+    )
+    return len(paper_trades)
+
+
+async def load_paper_trades(
+    session: AsyncSession, *, status: str | None = None
+) -> list[PaperTrade]:
+    """Reload paper trades, newest first. Optional ``status`` filter (open/closed/expired)."""
+    stmt = select(paper_trades_table)
+    if status is not None:
+        stmt = stmt.where(paper_trades_table.c.status == status)
+    rows = (
+        (await session.execute(stmt.order_by(paper_trades_table.c.advised_at.desc())))
+        .mappings()
+        .all()
+    )
+    return [_paper_trade_from_row(r) for r in rows]
 
 
 async def load_calibration(

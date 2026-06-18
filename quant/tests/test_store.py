@@ -408,3 +408,60 @@ async def test_position_insert_load_and_settle(sessionmaker):
         assert len(closed) == 1
         assert closed[0].pnl == Decimal("75")
         assert closed[0].outcome == 1
+
+
+# --- paper_trades (Slice F: no-money validation) -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_paper_trades_insert_load_decimal_roundtrip(sessionmaker):
+    from app.models.paper_trade import PaperTrade
+
+    directional = PaperTrade(
+        id="pt1",
+        advised_at=datetime(2026, 6, 1, tzinfo=UTC),
+        strategy="extreme_correction",
+        market_id="m1",
+        condition_id="c1",
+        side="yes",
+        advised_price=Decimal("0.42"),
+        stake_usd=Decimal("50"),
+        shares=Decimal("119.047619"),
+        edge=Decimal("0.08"),
+        p=Decimal("0.55"),
+        p_lo=Decimal("0.50"),
+        signal_id="extreme_correction:m1:1700000000000",
+    )
+    arb = PaperTrade(
+        id="pt2",
+        advised_at=datetime(2026, 6, 1, tzinfo=UTC),
+        strategy="set_arb",
+        market_id="m1",
+        condition_id="c1",
+        side="set",
+        advised_price=Decimal("0.97"),
+        stake_usd=Decimal("97"),
+        shares=Decimal("100"),
+        edge=Decimal("0.03"),
+    )
+    async with sessionmaker() as s:
+        n = await store.insert_paper_trades(s, [directional, arb])
+        assert n == 2
+        await s.commit()
+    async with sessionmaker() as s:
+        rows = await store.load_paper_trades(s, status="open")
+        assert len(rows) == 2
+        by_id = {r.id: r for r in rows}
+        # Decimal survives the NUMERIC round-trip exactly (no float drift).
+        assert by_id["pt1"].advised_price == Decimal("0.42")
+        assert by_id["pt1"].p_lo == Decimal("0.50")
+        assert by_id["pt1"].shares == Decimal("119.047619")
+        # set-arb leaves the directional-only probability columns NULL.
+        assert by_id["pt2"].p is None
+        assert by_id["pt2"].p_lo is None
+        assert by_id["pt2"].outcome is None
+
+
+async def test_insert_paper_trades_empty_is_noop(sessionmaker):
+    async with sessionmaker() as s:
+        assert await store.insert_paper_trades(s, []) == 0

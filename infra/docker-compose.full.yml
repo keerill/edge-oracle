@@ -94,6 +94,18 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
 
+  paper:          # no-money validation: auto-capture the bets the advisor would place (Slice F)
+    build: ../quant
+    environment: *quant-env
+    command: ["python", "-m", "app.paper.engine", "loop"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  resolution:     # journal calibration + settle live & paper trades vs real outcomes (Slice F)
+    build: ../quant
+    environment: *quant-env
+    command: ["python", "-m", "app.ingestion.resolution_engine", "loop"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
   web:
     build: ../web
     environment:

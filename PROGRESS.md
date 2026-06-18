@@ -1400,6 +1400,66 @@ ruff clean; web `pnpm test` → 83 passed, `tsc` clean, `pnpm build` green.
 (`uvicorn app.api.main:app --port 8010`) → web (`pnpm dev`) → open `/approvals`, click Approve
 (dry-run). Still external for LIVE money: Phase 5b flip (creds + verify) and Phase 7.
 
+## Slice: Paper-trading validation (Slice F)  ✅ done (2026-06-18)
+
+Closes the no-money validation loop: prove an edge exists — after fees, spread, slippage and
+gas — **before any capital is risked**. The system auto-logs the bets the advisor *would* place,
+then scores them against real market outcomes. The honest precondition to going live.
+
+### What's done
+- **`paper_trades` table + model** (commit 1): the auto-captured, no-money sibling of `positions`.
+  Frozen `Decimal`-native `PaperTrade` (yes/no/set; `p`/`p_lo` directional-only; open|closed|
+  expired). Alembic `0008`; `insert_paper_trades`/`load_paper_trades` in `store.py`.
+- **Auto-capture** (commit 2): `app/paper/capture.py` (pure) `paper_trade_from_advice` logs only
+  *actionable* recs — directional (cost gate passed + positive Kelly stake, filled at the all-in
+  ask) and set-arb (positive locked `net_edge`, $1/one-set basis); longshot never.
+  `select_new_paper_trades` dedups to **one open trade per (strategy, condition_id)**, newest wins.
+  `app/paper/engine.py` reuses the live read path (`_enrich`→`advise`) so paper sizing == dashboard
+  sizing; `run_paper_capture_once` seam + loop + CLI `python -m app.paper.engine [once|loop]`.
+- **Settlement / scoring** (commit 3): `store.settle_paper_trade`; `resolution_engine`
+  `run_paper_settlement_once` — directional settles against the real outcome (cost basis = advised
+  all-in price, so **paper P&L == backtest P&L**), set-arb settles immediately at its locked edge.
+  `run_resolution_cycle` (calibration + position + paper passes) + `run_resolution_poller`; the
+  resolution CLI gained a `loop` mode (was one-shot only).
+- **Scorecard** (commit 4): `app/math/paper_performance.py` (pure) `summarize_paper_trades` reuses
+  the backtest metric primitives (return / hit-rate / max-drawdown / Sharpe-like) + per-strategy
+  breakdown; `GET /paper-performance` (api-key guarded, zero-bet report until first settle).
+- **Deploy** (commit 5): `infra/docker-compose.full.yml` gains `paper` (capture loop) +
+  `resolution` (settle loop) services.
+
+### Verified
+- `cd quant && uv run pytest -q` → **357 passed, 29 skipped** (offline; +16 over Slice 6-UI).
+- With `EDGE_TEST_DATABASE_URL=…edge_test` → store round-trips (Decimal↔NUMERIC, set-arb leaves
+  `p`/`p_lo` NULL), settle, and the `/paper-performance` zero-bet wiring pass; `alembic upgrade
+  head` creates `paper_trades`. ruff clean (app+tests).
+
+### Money-math / correctness decisions (carry forward)
+- Directional paper P&L uses the **advised all-in ask** as cost basis, so it equals the backtest's
+  realized P&L (`settled_pnl` ⇔ `app.math.backtest.realized_pnl`).
+- **Set-arb paper P&L is fill-optimistic** (`arb_fill_assumed=true`): it assumes the dislocation
+  was still fillable at the advised VWAP — there is **no latency/fill-quality re-check yet**. The
+  per-strategy breakdown keeps it separate from the outcome-verified directional track. A real
+  fill-check (re-read the book N s later) is the documented next step before trusting arb numbers.
+- Capture/settle are idempotent at the cycle cadence: dedup by open (strategy, condition_id);
+  settlement only touches `status='open'` rows.
+
+### Run the validation loop (no money)
+```
+docker compose -f infra/docker-compose.full.yml up -d --build   # incl. paper + resolution loops
+# or host processes:
+cd quant && uv run python -m app.paper.engine loop               # capture advised bets
+cd quant && uv run python -m app.ingestion.resolution_engine loop # settle vs real outcomes
+# then watch GET /paper-performance accumulate over 2–4 weeks.
+```
+
+### Known edge / next
+- PK reuse: if a settled paper trade's *exact same* old signal re-fires after its key frees up, a
+  re-insert could collide on the id (rare — old signals rotate out of the recent window). Make
+  `insert_paper_trades` ON CONFLICT DO NOTHING if it ever bites.
+- Web: no `/paper-performance` dashboard page yet (endpoint only) — a small read-only page mirroring
+  the Backtest page is the obvious follow-up.
+- The real arb fill-quality check (above) is the gating item before arb paper numbers inform sizing.
+
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the
   dashboard row drops (today it lingers); extend the live re-eval beyond arb to the directional

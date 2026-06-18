@@ -165,10 +165,11 @@ async def run_paper_settlement_once(
     Set-arb ('set') paper trades are outcome-independent: they settle immediately at their
     locked ``edge`` (per set).
 
-    CAVEAT (verify-before-live): the arb P&L is **optimistic** — it assumes the dislocation was
-    still fillable at the advised VWAP when acted on. There is no latency / fill-quality re-check
-    yet, so arb paper P&L is an upper bound; the per-strategy breakdown keeps it separate from the
-    outcome-verified directional track. Only ``status='open'`` rows are touched (idempotent)."""
+    Set-arb P&L settles on the **fill-verified** edge (``rechecked_net_edge``, re-priced on a
+    fresh book at capture time), falling back to the detection-time ``edge`` for legacy rows
+    captured before the fill-check existed. Arbs whose edge did not survive the latency window
+    were captured ``status='expired'`` and are skipped here (only ``status='open'`` rows are
+    touched, idempotent), so they never inflate P&L."""
     at = now()
     async with sessionmaker() as session:
         open_trades = await store.load_paper_trades(session, status="open")
@@ -193,7 +194,8 @@ async def run_paper_settlement_once(
     directional_settled = 0
     async with sessionmaker() as session:
         for pt in arb:
-            pnl = arb_locked_profit(pt.edge, pt.shares)
+            edge = pt.rechecked_net_edge if pt.rechecked_net_edge is not None else pt.edge
+            pnl = arb_locked_profit(edge, pt.shares)
             await store.settle_paper_trade(
                 session, pt.id, outcome=None, realized_pnl=pnl, resolved_at=at
             )

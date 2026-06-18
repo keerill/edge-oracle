@@ -443,6 +443,11 @@ async def test_paper_trades_insert_load_decimal_roundtrip(sessionmaker):
         stake_usd=Decimal("97"),
         shares=Decimal("100"),
         edge=Decimal("0.03"),
+        fill_checked_at=datetime(2026, 6, 1, 0, 0, 12, tzinfo=UTC),
+        fill_ok=True,
+        fill_latency_s=Decimal("12.5"),
+        fill_reason="ok",
+        rechecked_net_edge=Decimal("0.025"),
     )
     async with sessionmaker() as s:
         n = await store.insert_paper_trades(s, [directional, arb])
@@ -460,6 +465,14 @@ async def test_paper_trades_insert_load_decimal_roundtrip(sessionmaker):
         assert by_id["pt2"].p is None
         assert by_id["pt2"].p_lo is None
         assert by_id["pt2"].outcome is None
+        # the fill re-check verdict survives the round-trip.
+        assert by_id["pt2"].fill_ok is True
+        assert by_id["pt2"].fill_latency_s == Decimal("12.5")
+        assert by_id["pt2"].fill_reason == "ok"
+        assert by_id["pt2"].rechecked_net_edge == Decimal("0.025")
+        # directional rows never carry a fill verdict.
+        assert by_id["pt1"].fill_ok is None
+        assert by_id["pt1"].rechecked_net_edge is None
 
 
 async def test_insert_paper_trades_empty_is_noop(sessionmaker):

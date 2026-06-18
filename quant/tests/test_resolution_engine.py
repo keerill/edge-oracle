@@ -227,6 +227,20 @@ async def test_paper_arb_settles_immediately_at_locked_edge(monkeypatch):
     assert settled[0]["outcome"] is None and settled[0]["pnl"] == Decimal("0.03")
 
 
+async def test_paper_arb_settles_on_rechecked_edge(monkeypatch):
+    settled: list[dict] = []
+    # detection-time edge 0.03, but the fill re-check found only 0.02 fillable -> settle on 0.02
+    arb = _paper("pt4", "c4", side="set", price="0.96", stake="1", edge="0.03", shares="1")
+    arb = arb.model_copy(update={"fill_ok": True, "rechecked_net_edge": Decimal("0.02")})
+    _patch_paper(monkeypatch, open_trades=[arb], settled=settled)
+    gamma = FakeGamma([])
+    result = await resolution_engine.run_paper_settlement_once(
+        gamma, fake_sessionmaker, Settings(), now=lambda: AT
+    )
+    assert result.arb_settled == 1
+    assert settled[0]["pnl"] == Decimal("0.02")  # rechecked edge, not the stale 0.03
+
+
 async def test_paper_directional_unresolved_is_left_open(monkeypatch):
     settled: list[dict] = []
     _patch_paper(monkeypatch, open_trades=[_paper("pt3", "c3", side="yes")], settled=settled)

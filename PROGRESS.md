@@ -1436,10 +1436,13 @@ then scores them against real market outcomes. The honest precondition to going 
 ### Money-math / correctness decisions (carry forward)
 - Directional paper P&L uses the **advised all-in ask** as cost basis, so it equals the backtest's
   realized P&L (`settled_pnl` ⇔ `app.math.backtest.realized_pnl`).
-- **Set-arb paper P&L is fill-optimistic** (`arb_fill_assumed=true`): it assumes the dislocation
-  was still fillable at the advised VWAP — there is **no latency/fill-quality re-check yet**. The
-  per-strategy breakdown keeps it separate from the outcome-verified directional track. A real
-  fill-check (re-read the book N s later) is the documented next step before trusting arb numbers.
+- **Set-arb paper P&L is now fill-verified** (was fill-optimistic): at capture the dislocation is
+  re-priced on a *fresh* book (`app/paper/fill_check.py` `check_arb_fill`, reusing the arb math), so
+  the arb track is trusted only when the edge survives the latency gap. Verified arbs settle on
+  `rechecked_net_edge` (not the stale signal VWAP); arbs whose edge vanished are captured
+  `status='expired'` and never inflate P&L. `arb_fill_assumed` is now data-driven (false once all
+  closed arbs were verified; legacy pre-check rows keep it true). Off-switch:
+  `EDGE_ARB_FILL_CHECK_ENABLED=0` reverts to optimistic capture. See "Slice F.1" below.
 - Capture/settle are idempotent at the cycle cadence: dedup by open (strategy, condition_id);
   settlement only touches `status='open'` rows.
 
@@ -1458,7 +1461,45 @@ cd quant && uv run python -m app.ingestion.resolution_engine loop # settle vs re
   `insert_paper_trades` ON CONFLICT DO NOTHING if it ever bites.
 - Web: no `/paper-performance` dashboard page yet (endpoint only) — a small read-only page mirroring
   the Backtest page is the obvious follow-up.
-- The real arb fill-quality check (above) is the gating item before arb paper numbers inform sizing.
+- ~~The real arb fill-quality check is the gating item before arb paper numbers inform sizing.~~
+  **Done — see Slice F.1 below.**
+
+## Slice: Arb fill-check (Slice F.1)  ✅ done (2026-06-18)
+
+The gating item from Slice F: re-confirm a set-arb is *still fillable* after the latency gap between
+detection and action, so arb paper numbers can be trusted. Full order-book depth is never persisted
+(only top-of-book lands in `quotes`), so the check re-reads a **live** book at capture time rather
+than replaying history at settlement.
+
+### What's done
+- **Pure re-check** (`app/paper/fill_check.py`): `check_arb_fill` re-runs the existing arb math
+  (`evaluate_long_set`/`evaluate_short_set`) for the advised side on fresh books → `ArbFillCheck`
+  (`ok`, `rechecked_net_edge`, `latency_s` from integer microseconds, `reason` ∈ {ok, depth_gone,
+  edge_collapsed, flipped_side, no_book}). No I/O, no clock — both timestamps injected.
+- **Capture integration** (`app/paper/engine.py`): `run_paper_capture_once` gains an injected
+  `ClobClient`; each newly-selected `set_arb` is re-priced via the reused `signals.engine.fetch_books`.
+  Pass → `open` + `rechecked_net_edge`; fail → `status='expired'` (excluded from P&L); a missing leg
+  or no client → skipped (key stays free, retries next cycle). Directional trades pass through.
+  Toggle: `arb_fill_check_enabled` (default on).
+- **Model/schema**: `PaperTrade` gains `fill_checked_at/fill_ok/fill_latency_s/fill_reason/
+  rechecked_net_edge`; `db/tables.py` + alembic `0009`; `store` (de)serializes them.
+- **Settlement** (`resolution_engine.run_paper_settlement_once`): arb P&L settles on
+  `rechecked_net_edge` (falls back to `edge` for legacy rows).
+- **Scorecard** (`math/paper_performance.py`): `arb_fill_assumed` derived from the data (no API-shape
+  change; the web caveat banner now hides automatically once arbs are verified).
+
+### Verified
+- `cd quant && uv run pytest -q` → **370 passed, 29 skipped** (offline; +13 over Slice F).
+- With `EDGE_TEST_DATABASE_URL=…edge_test` → **399 passed, 0 skipped**; `alembic upgrade head` applies
+  `0009` (5 nullable columns confirmed on `paper_trades`). ruff clean (app+tests).
+
+### Money-math / correctness decisions (carry forward)
+- Arb paper P&L settles on the **re-checked** net edge from a live book read at action time, never the
+  stale detection VWAP. `edge` is kept for provenance; `rechecked_net_edge` is what P&L uses.
+- A set-arb whose edge does not survive the latency window is `expired` and never contributes to P&L
+  (only `status='closed'` counts).
+- `latency_s` from integer microseconds (no float in the money path). Same-side only: a window flip
+  to the opposite arb counts as a failure.
 
 ## What's next
 - **Streaming, next steps**: emit a "removal"/staleness event when a live arb edge clears so the

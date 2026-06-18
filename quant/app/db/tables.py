@@ -199,6 +199,12 @@ paper_trades = sa.Table(
     sa.Column("realized_pnl", sa.Numeric, nullable=True),
     sa.Column("resolved_at", sa.TIMESTAMP(timezone=True), nullable=True),
     sa.Column("signal_id", sa.Text, nullable=True),
+    # Set-arb fill re-check verdict (NULL for directional / when the check is disabled).
+    sa.Column("fill_checked_at", sa.TIMESTAMP(timezone=True), nullable=True),
+    sa.Column("fill_ok", sa.Boolean, nullable=True),
+    sa.Column("fill_latency_s", sa.Numeric, nullable=True),
+    sa.Column("fill_reason", sa.Text, nullable=True),
+    sa.Column("rechecked_net_edge", sa.Numeric, nullable=True),  # verified fillable edge
     sa.CheckConstraint("outcome IS NULL OR outcome IN (0, 1)", name="ck_paper_trades_outcome"),
 )
 

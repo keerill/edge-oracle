@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     arb_gas: Decimal = Decimal("0.01")  # per-set on-chain cost estimate (split/merge/redeem)
     arb_slippage: Decimal = Decimal("0.01")  # per-set buffer beyond modeled book depth
     arb_min_net_edge: Decimal = Decimal(0)  # extra profit gate; flag only when net > this
+    # Re-price each captured set-arb on a fresh book before trusting its paper P&L (the gating
+    # item). Off -> arbs capture fill-optimistically as before. Set EDGE_ARB_FILL_CHECK_ENABLED=0
+    # to run the paper loop fully offline (no CLOB reads).
+    arb_fill_check_enabled: bool = True
 
     # --- Price-signal scanner (favourite-longshot + extreme-correction) -------
     # Bands/nudges mirror the pure Params defaults; override per-deployment as live spreads

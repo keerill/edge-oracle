@@ -78,7 +78,14 @@ def test_per_strategy_breakdown_and_arb_flag() -> None:
     assert ec.n == 1 and ec.wins == 1 and ec.total_pnl == Decimal("75")
     arbp = perf.per_strategy["set_arb"]
     assert arbp.n == 1 and arbp.total_pnl == Decimal("0.03")
-    assert perf.arb_fill_assumed is True
+    assert perf.arb_fill_assumed is True  # legacy arb (no fill check) -> still optimistic
+
+
+def test_arb_fill_assumed_false_when_verified() -> None:
+    arb = _closed("2", strategy="set_arb", side="set", stake="1", pnl="0.03", outcome=None)
+    verified = arb.model_copy(update={"fill_ok": True, "rechecked_net_edge": Decimal("0.03")})
+    perf = summarize_paper_trades([verified], initial_bankroll=Decimal("1000"))
+    assert perf.arb_fill_assumed is False  # fill-verified at capture -> caveat drops
 
 
 def test_open_trades_excluded_from_scoring() -> None:

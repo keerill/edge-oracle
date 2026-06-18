@@ -80,6 +80,11 @@ def summarize_paper_trades(
         by_strategy.setdefault(t.strategy, []).append(t)
     per_strategy = {s: _strategy_perf(s, ts) for s, ts in by_strategy.items()}
 
+    # Honest flag: the arb track is fill-optimistic only if a settled set-arb was NOT fill-verified
+    # at capture (legacy rows predating the fill-check). Verified arbs settle on their re-checked
+    # edge, so the caveat drops.
+    arb_fill_assumed = any(t.fill_ok is not True for t in by_strategy.get("set_arb", []))
+
     return PaperPerformance(
         initial_bankroll=initial_bankroll,
         final_bankroll=final,
@@ -92,5 +97,5 @@ def summarize_paper_trades(
         n_open=n_open,
         per_strategy=per_strategy,
         equity_curve=tuple(curve),
-        arb_fill_assumed="set_arb" in per_strategy,
+        arb_fill_assumed=arb_fill_assumed,
     )

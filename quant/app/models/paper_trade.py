@@ -9,6 +9,12 @@ market resolves. All money is ``Decimal``-native (frozen model).
 ``p``/``p_lo`` are the claimed probability and its CI lower bound — populated only for
 directional bets (``side`` in {"yes","no"}); set-arb is outcome-independent so they stay
 ``None``. ``outcome``/``realized_pnl``/``resolved_at`` stay ``None`` until settlement.
+
+The ``fill_*`` fields carry the set-arb fill re-check verdict (``app.paper.fill_check``): at
+capture time the dislocation is re-priced on a fresh book, so the arb track is only trusted
+when the edge survived the latency gap. Directional trades never set them. A failed re-check
+captures the trade as ``status="expired"`` (it never inflates P&L); a passing one keeps it
+``open`` and records ``rechecked_net_edge`` — the verified fillable edge arb P&L settles on.
 """
 
 from __future__ import annotations
@@ -51,3 +57,10 @@ class PaperTrade(BaseModel):
     realized_pnl: Decimal | None = None
     resolved_at: datetime | None = None
     signal_id: str | None = None
+
+    # Set-arb fill re-check verdict (None for directional / when the check is disabled).
+    fill_checked_at: datetime | None = None
+    fill_ok: bool | None = None
+    fill_latency_s: Decimal | None = None
+    fill_reason: str | None = None
+    rechecked_net_edge: Decimal | None = None  # verified fillable edge; arb P&L settles on it

@@ -425,6 +425,11 @@ def _paper_trade_from_row(r) -> PaperTrade:
         realized_pnl=r["realized_pnl"],
         resolved_at=r["resolved_at"],
         signal_id=r["signal_id"],
+        fill_checked_at=r["fill_checked_at"],
+        fill_ok=r["fill_ok"],
+        fill_latency_s=r["fill_latency_s"],
+        fill_reason=r["fill_reason"],
+        rechecked_net_edge=r["rechecked_net_edge"],
     )
 
 
